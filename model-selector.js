@@ -1,5 +1,5 @@
 /**
- * Script Selezione Modelli Finale: Gerarchia Mobile-First + Sistema Preferiti Persistente + Ricerca.
+ * Script Selezione Modelli Finale: Gerarchia Mobile-First + Sistema Preferiti Persistente + Ricerca + Multimodali.
  * Guard anti-duplicato: evita doppia inizializzazione se lo script viene caricato due volte.
  */
 
@@ -34,7 +34,6 @@ if (!window.__modelSelectorLoaded) {
 
         mainTrigger.onclick = () => {
             mainTrigger.classList.toggle('open');
-            // Auto-focus sulla barra di ricerca quando si apre il menu
             if (mainTrigger.classList.contains('open')) {
                 const searchInput = document.getElementById('model-search-input');
                 if (searchInput) searchInput.focus();
@@ -59,7 +58,6 @@ if (!window.__modelSelectorLoaded) {
             
             // --- 0. BARRA DI RICERCA ---
             const searchContainer = document.createElement('div');
-            // Stile inline di base per posizionamento sticky e visibilità
             searchContainer.style.cssText = 'padding: 8px; border-bottom: 1px solid #374151; position: sticky; top: 0; background: inherit; z-index: 10;';
             searchContainer.innerHTML = `
                 <input type="text" id="model-search-input" placeholder="🔍 Cerca modello..." 
@@ -68,13 +66,10 @@ if (!window.__modelSelectorLoaded) {
             mainSubmenu.appendChild(searchContainer);
 
             const searchInput = searchContainer.querySelector('#model-search-input');
-
-            // Contenitore per i risultati di ricerca (inizialmente nascosto)
             const searchResultsContainer = document.createElement('div');
             searchResultsContainer.style.display = 'none';
             mainSubmenu.appendChild(searchResultsContainer);
 
-            // Contenitore per la normale gerarchia a cartelle
             const treeContainer = document.createElement('div');
             mainSubmenu.appendChild(treeContainer);
 
@@ -83,12 +78,10 @@ if (!window.__modelSelectorLoaded) {
                 const query = e.target.value.toLowerCase().trim();
                 
                 if (query === '') {
-                    // Ripristina la vista a cartelle
                     searchResultsContainer.style.display = 'none';
                     treeContainer.style.display = 'block';
                     searchResultsContainer.innerHTML = '';
                 } else {
-                    // Mostra i risultati "flat" nascondendo le cartelle
                     treeContainer.style.display = 'none';
                     searchResultsContainer.style.display = 'block';
                     searchResultsContainer.innerHTML = '';
@@ -103,7 +96,6 @@ if (!window.__modelSelectorLoaded) {
                         filtered.forEach(model => {
                             createModelLeaf(model, searchResultsContainer, () => {
                                 renderFavoriteLeaves(favSubmenu);
-                                // Aggiorna graficamente la stellina anche nei risultati di ricerca
                                 if (searchInput.value.trim() !== '') searchInput.dispatchEvent(new Event('input'));
                             });
                         });
@@ -111,7 +103,7 @@ if (!window.__modelSelectorLoaded) {
                 }
             });
 
-            // --- 1. CARTELLA PREFERITI (Sempre in alto) ---
+            // --- 1. CARTELLA PREFERITI ---
             const favFolderBtn = createFolderNode("⭐ I Miei Preferiti", treeContainer);
             favFolderBtn.classList.add('folder-fav');
             const favSubmenu = document.createElement('div');
@@ -120,22 +112,53 @@ if (!window.__modelSelectorLoaded) {
 
             renderFavoriteLeaves(favSubmenu);
 
-            // --- 2. GERARCHIA CATALOGO COMPLETO ---
+            // --- 2. GERARCHIA CATALOGO COMPLETO AGGIORNATA ---
             const tree = {
-                "🟢 GRATIS": { "Standard": [], "Reasoning": [] },
-                "🟡 PREMIUM": { "Standard": [], "Reasoning": [] }
+                "🟢 GRATIS": { "Standard": [], "Reasoning": [], "🎨 Immagini & Video": [] },
+                "🟡 PREMIUM": { "Standard": [], "Reasoning": [], "🎨 Immagini & Video": [] }
             };
 
             allModels.forEach(m => {
-                const isFree = (m.pricing?.prompt === "0" || m.id.includes(':free'));
-                const isReasoning = m.id.toLowerCase().includes('r1') ||
-                                    m.id.toLowerCase().includes('reasoning') ||
-                                    m.name.toLowerCase().includes('think');
+                const idLow = m.id.toLowerCase();
+                const nameLow = m.name.toLowerCase();
+                
+                // Determina il costo
+                const isFree = (m.pricing?.prompt === "0" || idLow.includes(':free'));
+                
+                // Determina se è Reasoning
+                const isReasoning = idLow.includes('r1') || idLow.includes('reasoning') || nameLow.includes('think');
+                
+                // Determina se è Multimodale/Immagini/Video
+                let isMedia = false;
+                
+                // Controllo 1: tramite metadati ufficiali di OpenRouter (modality)
+                if (m.architecture && m.architecture.modality) {
+                    const modality = m.architecture.modality.toLowerCase();
+                    if (modality.includes('image') || modality.includes('video')) {
+                        isMedia = true;
+                    }
+                }
+                
+                // Controllo 2: fallback sulle keyword nel nome o ID se i metadati mancano
+                if (!isMedia) {
+                    const mediaKeywords = ['vision', 'flux', 'dall-e', 'stable-diffusion', 'sdxl', 'midjourney', 'runway', 'luma', 'kling', 'pixtral', 'image', 'video'];
+                    isMedia = mediaKeywords.some(kw => idLow.includes(kw) || nameLow.includes(kw));
+                }
+
+                // Assegnazione alla cartella corretta
                 const branch = isFree ? "🟢 GRATIS" : "🟡 PREMIUM";
-                const leaf = isReasoning ? "Reasoning" : "Standard";
+                let leaf = "Standard";
+                
+                if (isMedia) {
+                    leaf = "🎨 Immagini & Video";
+                } else if (isReasoning) {
+                    leaf = "Reasoning";
+                }
+                
                 tree[branch][leaf].push(m);
             });
 
+            // Rendering del menu
             for (let branch in tree) {
                 const branchBtn = createFolderNode(branch, treeContainer);
                 const branchSub = document.createElement('div');
@@ -157,7 +180,6 @@ if (!window.__modelSelectorLoaded) {
         }
 
         // --- FUNZIONI CREAZIONE NODI ---
-
         function createFolderNode(label, parent) {
             const div = document.createElement('div');
             div.className = 'menu-item';
@@ -192,7 +214,6 @@ if (!window.__modelSelectorLoaded) {
                 toggleFavorite(model.id);
                 onFavChange();
                 
-                // Aggiorna lo stato visivo della singola foglia immediatamente
                 const btn = e.currentTarget;
                 if (favoriteIds.includes(model.id)) {
                     btn.classList.add('active');
