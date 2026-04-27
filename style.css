@@ -143,3 +143,47 @@ button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* Stili per il Menu a Sottomenu */
+.nested-menu-container {
+    padding: 10px 20px;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+}
+
+.menu-item {
+    background: #0f172a;
+    color: white;
+    padding: 12px;
+    margin: 5px 0;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid #334155;
+    transition: all 0.2s;
+}
+
+.menu-item:hover { background: #1e293b; }
+
+.submenu {
+    margin-left: 15px;
+    border-left: 2px solid #3b82f6;
+    padding-left: 10px;
+    display: none; /* Nascosto di default */
+}
+
+.menu-item.open + .submenu {
+    display: block;
+}
+
+.model-option {
+    background: #1e293b;
+    font-size: 0.9em;
+    border-color: #475569;
+}
+
+.badge-free { color: #10b981; font-size: 0.8em; font-weight: bold; }
+.badge-paid { color: #f59e0b; font-size: 0.8em; font-weight: bold; }
+
