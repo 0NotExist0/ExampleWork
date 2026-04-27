@@ -1,5 +1,5 @@
 /**
- * Gestore principale dell'invio (Metodo Completo Ottimizzato)
+ * Gestore principale dell'invio (Metodo Completo - Architettura Disaccoppiata)
  */
 async function handleSendMessage() {
     const text = userInput.value.trim();
@@ -12,6 +12,7 @@ async function handleSendMessage() {
     toggleLoading(true);
 
     let msgDiv = null;
+    let isStreamActive = true; 
 
     try {
         if (!window.CONFIG || !window.CONFIG.API_KEY) {
@@ -51,7 +52,6 @@ async function handleSendMessage() {
         if (liveReasoning) msgDiv.appendChild(liveReasoning.container);
         
         const textNode = document.createElement('div');
-        // FIX: Assicura che i ritorni a capo del codice non vengano ignorati dal DOM
         textNode.style.whiteSpace = "pre-wrap"; 
         textNode.style.fontFamily = "inherit";
         textNode.textContent = "▮";
@@ -60,7 +60,7 @@ async function handleSendMessage() {
         messageArea.appendChild(msgDiv);
         messageArea.scrollTop = messageArea.scrollHeight;
 
-        // LETTURA DELLO STREAM
+        // VARIABILI DI STATO E BUFFER
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
@@ -69,107 +69,119 @@ async function handleSendMessage() {
         let rawContentBuffer = "";
         let receivedValidData = false;
 
-        // FIX: Throttling per evitare lag dell'interfaccia grafica
-        let lastScrollUpdate = Date.now();
+        let displayContent = "";
+        let displayReasoning = "";
 
+        // --- SISTEMA DI RENDERING ASINCRONO PER EVITARE LAG ---
+        // Disaccoppia la rete dall'aggiornamento UI usando il refresh rate del monitor
+        let renderRequested = false;
+        const updateUI = () => {
+            if (!isStreamActive) return;
+            
+            if (liveReasoning && displayReasoning) {
+                liveReasoning.updateText(displayReasoning);
+            } else if (displayReasoning) {
+                let reasoningEl = msgDiv.querySelector('.reasoning-fallback');
+                if (!reasoningEl) {
+                    reasoningEl = document.createElement('div');
+                    reasoningEl.className = 'reasoning-fallback';
+                    reasoningEl.style.cssText = 'color:#9ca3af; font-size:12px; border-left:2px solid #374151; padding-left:8px; margin-bottom:8px; white-space:pre-wrap';
+                    msgDiv.insertBefore(reasoningEl, textNode);
+                }
+                reasoningEl.textContent = `💭 ${displayReasoning}`;
+            }
+
+            textNode.textContent = displayContent.trimStart() + " ▮";
+            messageArea.scrollTop = messageArea.scrollHeight;
+            renderRequested = false;
+        };
+
+        const requestRender = () => {
+            if (!renderRequested) {
+                renderRequested = true;
+                requestAnimationFrame(updateUI);
+            }
+        };
+
+        // --- LETTURA DELLO STREAM BLINDATA ---
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             
             buffer += decoder.decode(value, { stream: true });
 
-            // FIX: Parser SSE robusto che non frammenta i pacchetti JSON contenenti codice
-            let newlineIndex;
-            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-                let line = buffer.slice(0, newlineIndex).trim();
-                buffer = buffer.slice(newlineIndex + 1);
-                
-                if (!line || line.startsWith(':')) continue;
+            // FIX: Splittiamo per "\n\n" che è lo standard rigido dei Server-Sent Events.
+            // Garantisce di non spezzare mai un JSON a metà riga.
+            let events = buffer.split('\n\n');
+            buffer = events.pop(); // L'ultimo blocco torna nel buffer se non è completo
 
-                if (line.includes('"error"')) {
-                    console.error("❌ Il server ha inviato un errore nello stream:", line);
-                    throw new Error("Errore interno del server durante la generazione.");
-                }
+            for (let eventStr of events) {
+                // Rimuoviamo il prefisso "data: " da ogni riga all'interno dell'evento
+                let lines = eventStr.split('\n');
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line || line.startsWith(':')) continue;
 
-                if (line.startsWith('data: ')) {
-                    const dataStr = line.substring(6);
-                    if (dataStr === '[DONE]') continue;
-                    
-                    try {
-                        const dataObj = JSON.parse(dataStr);
-                        const delta = dataObj.choices[0]?.delta;
+                    if (line.includes('"error"')) {
+                        throw new Error("Errore interno del server durante lo stream.");
+                    }
+
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.substring(6).trim();
+                        if (dataStr === '[DONE]') continue;
                         
-                        if (!delta) continue;
-                        receivedValidData = true;
+                        try {
+                            const dataObj = JSON.parse(dataStr);
+                            const delta = dataObj.choices?.[0]?.delta;
+                            
+                            if (!delta) continue;
+                            receivedValidData = true;
 
-                        if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
-                        if (delta.content) rawContentBuffer += delta.content;
+                            if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
+                            if (delta.content) rawContentBuffer += delta.content;
 
-                        // PARSER SEMPLIFICATO E SICURO per tag <think>
-                        let displayContent = "";
-                        let displayReasoning = "";
-
-                        const thinkStart = rawContentBuffer.indexOf('<think>');
-                        if (thinkStart !== -1) {
-                            const thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
-                            if (thinkEnd !== -1) {
-                                displayContent = rawContentBuffer.substring(0, thinkStart) + rawContentBuffer.substring(thinkEnd + 8);
-                                displayReasoning = rawContentBuffer.substring(thinkStart + 7, thinkEnd);
-                            } else {
-                                displayContent = rawContentBuffer.substring(0, thinkStart);
-                                displayReasoning = rawContentBuffer.substring(thinkStart + 7);
-                            }
-                        } else {
-                            displayContent = rawContentBuffer;
-                        }
-
-                        const finalReasoning = [nativeReasoningBuffer, displayReasoning]
-                            .filter(Boolean)
-                            .join("\n")
-                            .trim();
-
-                        if (finalReasoning) {
-                            if (liveReasoning) {
-                                liveReasoning.updateText(finalReasoning);
-                            } else {
-                                let reasoningEl = msgDiv.querySelector('.reasoning-fallback');
-                                if (!reasoningEl) {
-                                    reasoningEl = document.createElement('div');
-                                    reasoningEl.className = 'reasoning-fallback';
-                                    reasoningEl.style.cssText = 'color:#9ca3af; font-size:12px; border-left:2px solid #374151; padding-left:8px; margin-bottom:8px; white-space:pre-wrap';
-                                    msgDiv.insertBefore(reasoningEl, textNode);
+                            // PARSING DEI TAG <THINK>
+                            const thinkStart = rawContentBuffer.indexOf('<think>');
+                            if (thinkStart !== -1) {
+                                const thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
+                                if (thinkEnd !== -1) {
+                                    displayContent = rawContentBuffer.substring(0, thinkStart) + rawContentBuffer.substring(thinkEnd + 8);
+                                    displayReasoning = rawContentBuffer.substring(thinkStart + 7, thinkEnd);
+                                } else {
+                                    displayContent = rawContentBuffer.substring(0, thinkStart);
+                                    displayReasoning = rawContentBuffer.substring(thinkStart + 7);
                                 }
-                                reasoningEl.textContent = `💭 ${finalReasoning}`;
+                            } else {
+                                displayContent = rawContentBuffer;
+                                displayReasoning = "";
                             }
-                        }
 
-                        textNode.textContent = displayContent.trimStart() + " ▮";
+                            displayReasoning = [nativeReasoningBuffer, displayReasoning].filter(Boolean).join("\n").trim();
 
-                        // Aggiorna lo scroll solo ogni 100ms per non congelare il browser
-                        const now = Date.now();
-                        if (now - lastScrollUpdate > 100) {
-                            messageArea.scrollTop = messageArea.scrollHeight;
-                            lastScrollUpdate = now;
+                            // Richiede un aggiornamento UI ottimizzato
+                            requestRender();
+                            
+                        } catch (e) {
+                            // Se un JSON fallisce qui, è davvero corrotto, ma lo ignoriamo per non far saltare la chat
+                            console.warn("⚠️ Salto frammento JSON non valido:", e.message);
                         }
-                        
-                    } catch (e) {
-                        // Ignora silenziosamente solo i frammenti JSON temporaneamente spezzati
                     }
                 }
             }
         }
 
-        // --- FINE STREAM E GARBAGE COLLECTION ---
-        let finalContent = textNode.textContent.replace(" ▮", "").replace("▮", "").trim();
+        // --- FINE STREAM E PULIZIA ---
+        isStreamActive = false;
+        let finalContent = displayContent.trim();
         textNode.textContent = finalContent;
-        messageArea.scrollTop = messageArea.scrollHeight; // Scroll finale garantito
+        messageArea.scrollTop = messageArea.scrollHeight;
 
         if (liveReasoning) {
             const hasReasoning = (nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
             liveReasoning.finish(hasReasoning);
         }
 
-        if (!receivedValidData || (finalContent === "" && nativeReasoningBuffer === "" && !rawContentBuffer.includes('<think>'))) {
+        if (!receivedValidData || (finalContent === "" && displayReasoning === "")) {
             throw new Error("Ricevuta risposta vuota dal server.");
         } else {
             chatHistory.push({ role: 'assistant', content: finalContent });
@@ -177,23 +189,21 @@ async function handleSendMessage() {
 
     } catch (error) {
         console.error('❌ Eccezione fatale nel loop di rete:', error);
+        isStreamActive = false;
         
         if (msgDiv && msgDiv.parentNode) {
             if (msgDiv.textContent === "▮") {
-                // Se non ha stampato nulla, elimina il blocco
                 messageArea.removeChild(msgDiv);
             } else {
-                // Se si è interrotto a metà codice, mostra l'errore sotto il testo parziale
                 const errorAlert = document.createElement('div');
                 errorAlert.style.cssText = "color: #ef4444; font-size: 14px; margin-top: 10px;";
-                errorAlert.textContent = `[Rete Disconnessa: ${error.message}]`;
+                errorAlert.textContent = `[Errore generato: ${error.message}]`;
                 msgDiv.appendChild(errorAlert);
             }
         } else {
             appendUserMessage(`Errore di sistema: ${error.message}`, 'ai');
         }
         
-        // Rimuove l'ultimo messaggio inviato alla history per non corrompere la memoria del modello
         chatHistory.pop();
     } finally {
         toggleLoading(false);
