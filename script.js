@@ -1,5 +1,5 @@
 /**
- * Modulo Chat Principale (Core Logic con Streaming Frame-Perfect)
+ * Modulo Chat Principale (Core Logic con Failsafe, Garbage Collection e Cursore Live)
  */
 
 let chatHistory = [];
@@ -8,7 +8,7 @@ const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 
-console.log("⚙️ script.js avviato con parser Streaming su base index.");
+console.log("⚙️ script.js avviato con Failsafe e Garbage Collection attiva.");
 
 if (!sendBtn || !userInput) {
     console.error("❌ Errore: Elementi UI non trovati!");
@@ -59,7 +59,7 @@ async function handleSendMessage() {
             throw new Error(errorData.error?.message || `Errore HTTP ${response.status}`);
         }
 
-        // PREPARAZIONE UI
+        // ISTANZIAZIONE DEL PREFAB UI
         const msgDiv = document.createElement('div');
         msgDiv.classList.add('message', 'ai');
         
@@ -67,12 +67,13 @@ async function handleSendMessage() {
         if (liveReasoning) msgDiv.appendChild(liveReasoning.container);
         
         const textNode = document.createElement('div');
+        textNode.textContent = "▮"; // Cursore di caricamento iniziale
         msgDiv.appendChild(textNode);
         
         messageArea.appendChild(msgDiv);
         messageArea.scrollTop = messageArea.scrollHeight;
 
-        // LETTURA DELLO STREAM IN TEMPO REALE
+        // LETTURA DELLO STREAM
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
@@ -99,61 +100,67 @@ async function handleSendMessage() {
                         const delta = dataObj.choices[0]?.delta;
                         if (!delta) continue;
 
-                        // Accumula i chunk grezzi
                         if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
                         if (delta.content) rawContentBuffer += delta.content;
 
-                        // PARSER ROBUSTO (Resiliente ai pacchetti tagliati)
-                        let cStr = "";
-                        let rStr = "";
-                        let curr = 0;
-                        
-                        while(true) {
-                            let startTag = rawContentBuffer.indexOf('<think>', curr);
-                            if (startTag === -1) {
-                                // Nessun tag di inizio, tutto il resto è testo normale
-                                cStr += rawContentBuffer.substring(curr);
-                                break;
-                            }
-                            // Aggiungi il testo prima del <think>
-                            cStr += rawContentBuffer.substring(curr, startTag);
-                            
-                            let endTag = rawContentBuffer.indexOf('</think>', startTag + 7);
-                            if (endTag === -1) {
-                                // Tag aperto ma non ancora chiuso (stiamo ancora streammando il pensiero)
-                                rStr += rawContentBuffer.substring(startTag + 7);
-                                break;
+                        // PARSER SEMPLIFICATO E SICURO
+                        let displayContent = "";
+                        let displayReasoning = "";
+
+                        let thinkStart = rawContentBuffer.indexOf('<think>');
+                        if (thinkStart !== -1) {
+                            let thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
+                            if (thinkEnd !== -1) {
+                                // Tag chiuso: prendiamo il testo prima e dopo il tag
+                                displayContent = rawContentBuffer.substring(0, thinkStart) + rawContentBuffer.substring(thinkEnd + 8);
+                                displayReasoning = rawContentBuffer.substring(thinkStart + 7, thinkEnd);
                             } else {
-                                // Tag aperto e chiuso
-                                rStr += rawContentBuffer.substring(startTag + 7, endTag) + "\n";
-                                curr = endTag + 8;
+                                // Tag aperto: tutto ciò che c'è dopo <think> è ragionamento in corso
+                                displayContent = rawContentBuffer.substring(0, thinkStart);
+                                displayReasoning = rawContentBuffer.substring(thinkStart + 7);
                             }
+                        } else {
+                            // Nessun tag presente
+                            displayContent = rawContentBuffer;
                         }
 
-                        let finalReasoning = (nativeReasoningBuffer + "\n" + rStr).trim();
+                        let finalReasoning = (nativeReasoningBuffer + "\n" + displayReasoning).trim();
                         
-                        // AGGIORNAMENTO UI IN DIRETTA
+                        // Aggiorna la UI in tempo reale, aggiungendo il cursore lampeggiante alla fine del testo
                         if (finalReasoning && liveReasoning) {
                             liveReasoning.updateText(finalReasoning);
                         }
-                        textNode.textContent = cStr.trimStart();
+                        textNode.textContent = displayContent.trimStart() + " ▮";
                         
                         messageArea.scrollTop = messageArea.scrollHeight;
                         
                     } catch (e) {
-                        // Ignoriamo micro-errori JSON per non bloccare il loop
+                        // Salta frame corrotti
                     }
                 }
             }
         }
 
-        // CHIUSURA STREAM (Update Finale)
+        // --- FINE STREAM E GARBAGE COLLECTION ---
+        
+        // 1. Rimuove il cursore lampeggiante
+        let finalContent = textNode.textContent.replace(" ▮", "").replace("▮", "").trim();
+        textNode.textContent = finalContent;
+
         if (liveReasoning) {
             const hasReasoning = (nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
             liveReasoning.finish(hasReasoning);
         }
-        
-        chatHistory.push({ role: 'assistant', content: textNode.textContent });
+
+        // 2. Failsafe: Se il div è vuoto (il modello non ha detto nulla), distruggiamo il GameObject
+        if (finalContent === "" && nativeReasoningBuffer === "" && !rawContentBuffer.includes('<think>')) {
+            console.warn("⚠️ Ricevuta risposta vuota dal server. Eseguo il Destroy del nodo UI.");
+            messageArea.removeChild(msgDiv); // Destroy(gameObject)
+            appendUserMessage("⚠️ Il modello non ha fornito alcuna risposta. Potrebbe essere sovraccarico.", 'ai');
+            chatHistory.pop(); // Rimuoviamo la nostra domanda dalla history per non corrompere il contesto
+        } else {
+            chatHistory.push({ role: 'assistant', content: finalContent });
+        }
 
     } catch (error) {
         console.error('❌ Errore API:', error);
