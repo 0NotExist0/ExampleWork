@@ -1,47 +1,36 @@
 /**
  * Modulo Chat Principale (Core Logic)
- * Richiede che config.js sia caricato.
+ * Richiede config.js
  */
 
 let chatHistory = [];
 
-// Dichiariamo le variabili vuote
-let messageArea, userInput, sendBtn;
+// Riferimenti diretti (come variabili pubbliche assegnate dall'Inspector)
+const messageArea = document.getElementById('messages');
+const userInput = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
 
-// L'equivalente del void Start() in Unity: aspetta che tutta la scena UI sia caricata
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("⚙️ script.js caricato: inizializzazione riferimenti UI...");
-    
-    // Assegnazione dei riferimenti
-    messageArea = document.getElementById('messages');
-    userInput = document.getElementById('user-input');
-    sendBtn = document.getElementById('send-btn');
+// Inizializzazione immediata
+console.log("⚙️ script.js avviato. Configurazione attuale:", window.CONFIG);
 
-    if (!sendBtn || !userInput) {
-        console.error("❌ Errore critico: Elementi UI non trovati! Controlla i nomi degli ID nell'HTML.");
-        return;
-    }
-
-    // Event Listeners di input (Il nostro OnClick)
+if (!sendBtn || !userInput) {
+    console.error("❌ Errore critico: Elementi UI non trovati!");
+} else {
+    // Assegna gli eventi
     sendBtn.addEventListener('click', handleSendMessage);
     userInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handleSendMessage();
     });
-
-    console.log("✅ Sistema pronto. In attesa di input utente...");
+    console.log("✅ Sistema pronto.");
     userInput.focus();
-});
+}
 
 /**
  * Gestore principale dell'invio messaggi (Metodo Completo)
  */
 async function handleSendMessage() {
-    console.log("▶️ Richiesto invio messaggio.");
     const text = userInput.value.trim();
-    if (!text) {
-        console.log("⚠️ Testo vuoto, comando ignorato.");
-        return;
-    }
+    if (!text) return;
 
     appendMessage(text, 'user');
     userInput.value = '';
@@ -51,12 +40,10 @@ async function handleSendMessage() {
     toggleLoading(true);
 
     try {
+        // Controllo di sicurezza su config.js
         if (!window.CONFIG || !window.CONFIG.API_KEY) {
-            throw new Error("File config.js non trovato o API Key mancante.");
+            throw new Error("Dati di configurazione mancanti. config.js è stato caricato?");
         }
-
-        console.log("📡 Avvio chiamata API verso:", window.CONFIG.API_URL);
-        console.log("🧠 Modello target:", window.CONFIG.MODEL);
 
         const response = await fetch(window.CONFIG.API_URL, {
             method: 'POST',
@@ -75,13 +62,10 @@ async function handleSendMessage() {
 
         if (!response.ok) {
             const errorData = await response.json();
-            console.error("❌ Errore ritornato dal server OpenRouter:", errorData);
-            throw new Error(errorData.error?.message || `Errore Server HTTP ${response.status}`);
+            throw new Error(errorData.error?.message || `Errore HTTP ${response.status}`);
         }
 
         const data = await response.json();
-        console.log("✅ Dati ricevuti con successo:", data);
-        
         const messageObj = data.choices[0].message;
         
         let aiResponse = messageObj.content || '';
@@ -98,7 +82,7 @@ async function handleSendMessage() {
         chatHistory.push({ role: 'assistant', content: aiResponse });
 
     } catch (error) {
-        console.error('❌ Eccezione catturata durante il ciclo:', error);
+        console.error('❌ Errore:', error);
         appendMessage(`Errore di sistema: ${error.message}`, 'ai');
         chatHistory.pop(); 
     } finally {
@@ -107,7 +91,7 @@ async function handleSendMessage() {
 }
 
 /**
- * Gestore dell'interfaccia utente
+ * Generazione grafica dei messaggi
  */
 function appendMessage(content, sender, reasoning = null) {
     const msgDiv = document.createElement('div');
