@@ -1,175 +1,238 @@
 /**
- * Script indipendente per il caricamento, la ricerca e la selezione
- * dinamica dei modelli tramite l'API di OpenRouter.
- * ORA CON CATEGORIZZAZIONE AUTOMATICA (Gratis/Premium e Standard/Pensanti).
+ * Script indipendente per il caricamento, la selezione dinamica,
+ * la categorizzazione e il SALVATAGGIO DEI PREFERITI (tramite localStorage come PlayerPrefs).
  */
 
 async function initModelSelector() {
     const header = document.querySelector('header');
     
-    // Contenitore UI
+    // --- 1. COSTRUZIONE UI (Interfaccia) ---
     const selectorContainer = document.createElement('div');
     Object.assign(selectorContainer.style, {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-        padding: '15px 20px',
-        backgroundColor: 'rgba(15, 23, 42, 0.7)',
+        display: 'flex', flexDirection: 'column', gap: '10px',
+        padding: '15px 20px', backgroundColor: 'rgba(15, 23, 42, 0.7)',
         borderBottom: '1px solid #334155'
     });
 
+    // Campo di ricerca
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
-    searchInput.placeholder = 'Cerca modello (es. nemotron, llama, deepseek...)';
+    searchInput.placeholder = 'Cerca modello nel catalogo...';
     Object.assign(searchInput.style, {
-        padding: '10px',
-        borderRadius: '8px',
-        border: '1px solid #334155',
-        backgroundColor: '#0f172a',
-        color: '#f8fafc',
-        width: '100%',
-        outline: 'none'
+        padding: '10px', borderRadius: '8px', border: '1px solid #334155',
+        backgroundColor: '#0f172a', color: '#f8fafc', width: '100%', outline: 'none'
     });
 
-    const selectDropdown = document.createElement('select');
-    Object.assign(selectDropdown.style, {
-        padding: '10px',
-        borderRadius: '8px',
-        border: '1px solid #334155',
-        backgroundColor: '#0f172a',
-        color: '#f8fafc',
-        width: '100%',
-        cursor: 'pointer',
-        outline: 'none'
+    // Riga Catalogo Principale + Tasto Aggiungi
+    const mainRow = document.createElement('div');
+    mainRow.style.display = 'flex'; mainRow.style.gap = '8px';
+    
+    const mainSelect = document.createElement('select');
+    Object.assign(mainSelect.style, {
+        padding: '10px', borderRadius: '8px', border: '1px solid #334155',
+        backgroundColor: '#0f172a', color: '#f8fafc', flex: '1', cursor: 'pointer', outline: 'none'
+    });
+    
+    const addFavBtn = document.createElement('button');
+    addFavBtn.innerHTML = '⭐';
+    addFavBtn.title = 'Aggiungi ai Preferiti';
+    Object.assign(addFavBtn.style, {
+        padding: '10px', borderRadius: '8px', border: '1px solid #3b82f6',
+        backgroundColor: '#1e293b', cursor: 'pointer', outline: 'none'
     });
 
+    // Riga Preferiti + Tasto Rimuovi
+    const favRow = document.createElement('div');
+    favRow.style.display = 'flex'; favRow.style.gap = '8px';
+    
+    const favSelect = document.createElement('select');
+    Object.assign(favSelect.style, {
+        padding: '10px', borderRadius: '8px', border: '1px solid #10b981', // Bordo verde per i preferiti
+        backgroundColor: '#0f172a', color: '#10b981', flex: '1', cursor: 'pointer', outline: 'none'
+    });
+    
+    const removeFavBtn = document.createElement('button');
+    removeFavBtn.innerHTML = '🗑️';
+    removeFavBtn.title = 'Rimuovi dai Preferiti';
+    Object.assign(removeFavBtn.style, {
+        padding: '10px', borderRadius: '8px', border: '1px solid #ef4444',
+        backgroundColor: '#1e293b', cursor: 'pointer', outline: 'none'
+    });
+
+    // Assemblaggio UI
+    mainRow.appendChild(mainSelect);
+    mainRow.appendChild(addFavBtn);
+    favRow.appendChild(favSelect);
+    favRow.appendChild(removeFavBtn);
+    
     selectorContainer.appendChild(searchInput);
-    selectorContainer.appendChild(selectDropdown);
+    selectorContainer.appendChild(mainRow);
+    selectorContainer.appendChild(favRow);
     header.parentNode.insertBefore(selectorContainer, header.nextSibling);
 
+    // --- 2. GESTIONE DATI (PlayerPrefs / localStorage) ---
     let allModels = [];
+    // Carica la stringa JSON dal browser, se vuoto crea un array
+    let favoriteIds = JSON.parse(localStorage.getItem('nemotron_favorites')) || [];
 
-    // --- SCARICAMENTO DATI ---
+    function saveFavorites() {
+        // Salva l'array convertendolo in stringa JSON
+        localStorage.setItem('nemotron_favorites', JSON.stringify(favoriteIds));
+        renderFavorites();
+    }
+
+    // --- 3. LOGICA DI RETE ---
     try {
-        selectDropdown.innerHTML = '<option>Scaricamento modelli in corso...</option>';
+        mainSelect.innerHTML = '<option>Scaricamento catalogo...</option>';
+        favSelect.innerHTML = '<option>Caricamento preferiti...</option>';
         
         const response = await fetch('https://openrouter.ai/api/v1/models');
-        if (!response.ok) throw new Error('Errore di rete');
+        if (!response.ok) throw new Error('Errore API');
         
         const data = await response.json();
         allModels = data.data;
-        
-        // Ordine alfabetico di base
         allModels.sort((a, b) => a.id.localeCompare(b.id));
         
-        renderOptions(allModels);
+        renderMainOptions(allModels);
+        renderFavorites();
     } catch (error) {
-        console.error("Errore nel caricamento dei modelli:", error);
-        selectDropdown.innerHTML = '<option>Errore nel caricamento dei modelli</option>';
+        mainSelect.innerHTML = '<option>Errore rete</option>';
+        favSelect.innerHTML = '<option>Errore rete</option>';
     }
 
-    // --- FUNZIONE DI RENDERING E CATEGORIZZAZIONE ---
-    function renderOptions(filteredModels) {
-        selectDropdown.innerHTML = ''; 
-        
+    // --- 4. FUNZIONI DI RENDERING ---
+    function renderMainOptions(filteredModels) {
+        mainSelect.innerHTML = ''; 
         if (filteredModels.length === 0) {
-            selectDropdown.innerHTML = '<option value="">Nessun modello trovato</option>';
+            mainSelect.innerHTML = '<option value="">Nessun modello trovato</option>';
             return;
         }
 
-        // 1. Definiamo i nostri "Tab dell'Inventario"
         const categories = {
-            freeReasoning: { label: '🟢 GRATIS - Modelli Pensanti (Reasoning)', models: [] },
-            freeStandard:  { label: '🟢 GRATIS - Modelli Standard', models: [] },
-            paidReasoning: { label: '🟡 PREMIUM - Modelli Pensanti (Reasoning)', models: [] },
-            paidStandard:  { label: '🟡 PREMIUM - Modelli Standard', models: [] }
+            freeReasoning: { label: '🟢 GRATIS - Pensanti', models: [] },
+            freeStandard:  { label: '🟢 GRATIS - Standard', models: [] },
+            paidReasoning: { label: '🟡 PREMIUM - Pensanti', models: [] },
+            paidStandard:  { label: '🟡 PREMIUM - Standard', models: [] }
         };
 
-        // 2. Cicliamo i modelli e li smistiamo (Logica di Sorting)
         filteredModels.forEach(model => {
-            
-            // A) Capire se è gratis
             let isFree = false;
-            // OpenRouter invia i prezzi come stringhe (es: "0.0")
             if (model.pricing) {
-                const promptPrice = parseFloat(model.pricing.prompt || "0");
-                const completionPrice = parseFloat(model.pricing.completion || "0");
-                if (promptPrice === 0 && completionPrice === 0) {
-                    isFree = true;
-                }
+                const p = parseFloat(model.pricing.prompt || "0");
+                const c = parseFloat(model.pricing.completion || "0");
+                if (p === 0 && c === 0) isFree = true;
             } 
-            // Fallback se l'ID finisce con :free
             if (model.id.endsWith(':free')) isFree = true;
 
-            // B) Capire se è un modello che ragiona (Pensante)
-            const idLower = model.id.toLowerCase();
-            const nameLower = model.name.toLowerCase();
-            const isReasoning = 
-                idLower.includes('deepseek-r1') || 
-                idLower.includes('reasoning') || 
-                nameLower.includes('reasoning') || 
-                nameLower.includes('think') ||
-                idLower.includes('thinking');
+            const idL = model.id.toLowerCase();
+            const nameL = model.name.toLowerCase();
+            const isReasoning = idL.includes('deepseek-r1') || idL.includes('reasoning') || nameL.includes('think');
 
-            // C) Smistamento nell'oggetto giusto
-            if (isFree && isReasoning) {
-                categories.freeReasoning.models.push(model);
-            } else if (isFree && !isReasoning) {
-                categories.freeStandard.models.push(model);
-            } else if (!isFree && isReasoning) {
-                categories.paidReasoning.models.push(model);
-            } else {
-                categories.paidStandard.models.push(model);
-            }
+            if (isFree && isReasoning) categories.freeReasoning.models.push(model);
+            else if (isFree && !isReasoning) categories.freeStandard.models.push(model);
+            else if (!isFree && isReasoning) categories.paidReasoning.models.push(model);
+            else categories.paidStandard.models.push(model);
         });
 
-        // 3. Creiamo l'interfaccia basandoci sulle categorie piene
-        Object.values(categories).forEach(category => {
-            if (category.models.length > 0) {
-                // Genera l'OptGroup (L'intestazione non selezionabile della categoria)
+        Object.values(categories).forEach(cat => {
+            if (cat.models.length > 0) {
                 const optgroup = document.createElement('optgroup');
-                optgroup.label = category.label;
-
-                // Genera le Option (I modelli effettivi dentro quella categoria)
-                category.models.forEach(model => {
+                optgroup.label = cat.label;
+                cat.models.forEach(model => {
                     const option = document.createElement('option');
                     option.value = model.id;
-                    option.textContent = `${model.name} (${model.id})`;
-                    
-                    if (window.CONFIG && model.id === window.CONFIG.MODEL) {
-                        option.selected = true;
-                    }
+                    option.textContent = `${model.name}`; // Nome pulito
+                    if (window.CONFIG && model.id === window.CONFIG.MODEL) option.selected = true;
                     optgroup.appendChild(option);
                 });
-
-                selectDropdown.appendChild(optgroup);
+                mainSelect.appendChild(optgroup);
             }
         });
     }
 
-    // --- EVENT LISTENERS ---
+    function renderFavorites() {
+        favSelect.innerHTML = '';
+        if (favoriteIds.length === 0) {
+            favSelect.innerHTML = '<option value="">Nessun preferito salvato</option>';
+            return;
+        }
+        
+        // Cerca i dati completi dei modelli basandosi sugli ID salvati
+        favoriteIds.forEach(id => {
+            const modelData = allModels.find(m => m.id === id);
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = modelData ? `⭐ ${modelData.name}` : `⭐ ${id} (Sconosciuto)`;
+            
+            if (window.CONFIG && id === window.CONFIG.MODEL) option.selected = true;
+            favSelect.appendChild(option);
+        });
+    }
+
+    // --- 5. EVENT LISTENERS ---
+
+    // Aggiorna il Manager Globale quando cambi modello
+    function updateGlobalModel(newId) {
+        if (newId && window.CONFIG) {
+            window.CONFIG.MODEL = newId; 
+            const statusIndicator = document.querySelector('.status-indicator');
+            if (statusIndicator) {
+                const shortName = newId.split('/').pop();
+                statusIndicator.innerHTML = `Online - <span style="color:#f8fafc; margin-left:4px">${shortName}</span>`;
+            }
+        }
+    }
+
+    // Cambi modello dal catalogo principale
+    mainSelect.addEventListener('change', (e) => {
+        updateGlobalModel(e.target.value);
+        // Sincronizza visivamente la tendina dei preferiti se il modello scelto è lì
+        if (favoriteIds.includes(e.target.value)) favSelect.value = e.target.value;
+    });
+
+    // Cambi modello dai preferiti
+    favSelect.addEventListener('change', (e) => {
+        updateGlobalModel(e.target.value);
+        // Sincronizza visivamente il catalogo principale
+        mainSelect.value = e.target.value;
+    });
+
+    // Tasto Aggiungi ai Preferiti
+    addFavBtn.addEventListener('click', () => {
+        const currentId = mainSelect.value;
+        if (currentId && !favoriteIds.includes(currentId)) {
+            favoriteIds.push(currentId);
+            saveFavorites(); // Salva nel localStorage
+            favSelect.value = currentId; // Selezionalo subito
+            console.log("Aggiunto ai preferiti:", currentId);
+        }
+    });
+
+    // Tasto Rimuovi dai Preferiti
+    removeFavBtn.addEventListener('click', () => {
+        const currentId = favSelect.value;
+        if (currentId) {
+            favoriteIds = favoriteIds.filter(id => id !== currentId);
+            saveFavorites(); // Aggiorna il localStorage
+            console.log("Rimosso dai preferiti:", currentId);
+            
+            // Se svuotiamo i preferiti, resettiamo la selezione al mainSelect
+            if(favoriteIds.length > 0) {
+                updateGlobalModel(favSelect.value);
+            } else {
+                updateGlobalModel(mainSelect.value);
+            }
+        }
+    });
+
+    // Ricerca
     searchInput.addEventListener('input', (e) => {
         const searchTerm = e.target.value.toLowerCase();
-        // Filtra tutti i modelli. La funzione renderOptions ricreerà le categorie dinamicamente!
         const filtered = allModels.filter(m => 
             m.name.toLowerCase().includes(searchTerm) || 
             m.id.toLowerCase().includes(searchTerm)
         );
-        renderOptions(filtered);
-    });
-
-    selectDropdown.addEventListener('change', (e) => {
-        const selectedModelId = e.target.value;
-        if (selectedModelId && window.CONFIG) {
-            window.CONFIG.MODEL = selectedModelId; 
-            console.log("Modello cambiato in:", window.CONFIG.MODEL);
-            
-            const statusIndicator = document.querySelector('.status-indicator');
-            if (statusIndicator) {
-                const shortName = selectedModelId.split('/').pop();
-                statusIndicator.innerHTML = `Online - <span style="color:#f8fafc; margin-left:4px">${shortName}</span>`;
-            }
-        }
+        renderMainOptions(filtered);
     });
 }
 
