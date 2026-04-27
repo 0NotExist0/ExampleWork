@@ -1,5 +1,5 @@
 /**
- * Modulo Chat Principale (Core Logic con Streaming In-Diretta)
+ * Modulo Chat Principale (Core Logic con Streaming Resiliente)
  */
 
 let chatHistory = [];
@@ -8,7 +8,7 @@ const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 
-console.log("⚙️ script.js avviato con modulo Streaming.");
+console.log("⚙️ script.js avviato con parser Streaming avanzato.");
 
 if (!sendBtn || !userInput) {
     console.error("❌ Errore: Elementi UI non trovati!");
@@ -21,13 +21,12 @@ if (!sendBtn || !userInput) {
 }
 
 /**
- * Gestore principale dell'invio (Metodo Streaming Completo)
+ * Gestore principale dell'invio (Metodo Completo)
  */
 async function handleSendMessage() {
     const text = userInput.value.trim();
     if (!text) return;
 
-    // Aggiungi il messaggio dell'utente alla UI e alla history
     appendUserMessage(text);
     userInput.value = '';
     chatHistory.push({ role: 'user', content: text });
@@ -51,7 +50,7 @@ async function handleSendMessage() {
                 model: window.CONFIG.MODEL, 
                 messages: chatHistory,
                 include_reasoning: true,
-                stream: true // ⬅️ LA MAGIA E' QUI: abilitiamo lo streaming!
+                stream: true 
             })
         });
 
@@ -60,15 +59,13 @@ async function handleSendMessage() {
             throw new Error(errorData.error?.message || `Errore HTTP ${response.status}`);
         }
 
-        // PREPARAZIONE UI: Creiamo il contenitore del messaggio IA vuoto
+        // PREPARAZIONE UI
         const msgDiv = document.createElement('div');
         msgDiv.classList.add('message', 'ai');
         
-        // Istanziamo il componente logico (se c'è)
         const liveReasoning = window.ReasoningUI ? window.ReasoningUI.createLiveReasoningBlock() : null;
         if (liveReasoning) msgDiv.appendChild(liveReasoning.container);
         
-        // Nodo per la risposta finale testuale
         const textNode = document.createElement('div');
         msgDiv.appendChild(textNode);
         
@@ -80,18 +77,17 @@ async function handleSendMessage() {
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
         
-        let fullAiResponse = "";
-        let fullReasoningText = "";
-        let isInsideThinkTag = false; // Macchina a stati per i tag <think>
+        // Variabili di accumulo globali (il nostro Buffer persistente)
+        let nativeReasoningBuffer = "";
+        let rawContentBuffer = "";
 
-        // Coroutine per la lettura dei chunk
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             
             buffer += decoder.decode(value, { stream: true });
             let lines = buffer.split('\n');
-            buffer = lines.pop(); // Mantiene in memoria il frammento tagliato a metà
+            buffer = lines.pop(); // Tieni l'ultimo frammento incompleto in memoria
 
             for (let line of lines) {
                 line = line.trim();
@@ -101,53 +97,59 @@ async function handleSendMessage() {
                     
                     try {
                         const dataObj = JSON.parse(dataStr);
-                        const delta = dataObj.choices[0].delta;
+                        const delta = dataObj.choices[0]?.delta;
 
-                        // 1. Gestione Reasoning Nativi OpenRouter
+                        if (!delta) continue;
+
+                        // 1. Accumula dati in arrivo
                         if (delta.reasoning) {
-                            fullReasoningText += delta.reasoning;
-                            if (liveReasoning) liveReasoning.updateText(fullReasoningText);
+                            nativeReasoningBuffer += delta.reasoning;
+                        }
+                        if (delta.content) {
+                            rawContentBuffer += delta.content;
                         }
 
-                        // 2. Gestione Contenuto e Tag <think> in tempo reale
-                        if (delta.content) {
-                            let contentChunk = delta.content;
+                        // 2. Parser Dinamico: ricalcola cosa mostrare ad ogni frame
+                        let displayReasoning = nativeReasoningBuffer;
+                        let displayContent = rawContentBuffer;
 
-                            if (contentChunk.includes('<think>')) {
-                                isInsideThinkTag = true;
-                                contentChunk = contentChunk.replace('<think>', '');
-                            }
-                            if (contentChunk.includes('</think>')) {
-                                isInsideThinkTag = false;
-                                contentChunk = contentChunk.replace('</think>', '');
-                            }
+                        // Questa Regex intercetta il tag <think> sia che sia chiuso (</think>) 
+                        // sia che sia ancora aperto (|$), prevenendo tagli dovuti al lag di rete
+                        const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/i;
+                        const match = displayContent.match(thinkRegex);
 
-                            if (isInsideThinkTag) {
-                                fullReasoningText += contentChunk;
-                                if (liveReasoning) liveReasoning.updateText(fullReasoningText);
-                            } else {
-                                fullAiResponse += contentChunk;
-                                textNode.textContent = fullAiResponse; // Aggiorna in diretta
-                            }
+                        if (match) {
+                            // Estrae il pensiero dal buffer del contenuto
+                            displayReasoning += (displayReasoning ? "\n" : "") + match[1];
+                            // Nasconde il blocco testuale grezzo dalla risposta finale
+                            displayContent = displayContent.replace(thinkRegex, '').trimStart();
                         }
                         
-                        // Auto-scroll durante la generazione
+                        // 3. Aggiorna l'interfaccia
+                        if (displayReasoning && liveReasoning) {
+                            liveReasoning.updateText(displayReasoning);
+                        }
+                        textNode.textContent = displayContent;
+                        
                         messageArea.scrollTop = messageArea.scrollHeight;
                         
                     } catch (e) {
-                        // Ignora JSON incompleti nel buffer ed elabora il prossimo frame
+                        // Salta JSON rotti senza interrompere il ciclo
                     }
                 }
             }
         }
 
-        // Chiusura fine stream
+        // Chiusura e salvataggio
         if (liveReasoning) liveReasoning.finish();
-        chatHistory.push({ role: 'assistant', content: fullAiResponse });
+        
+        // Salviamo nella cronologia solo il testo finale depurato dai tag
+        const finalContent = textNode.textContent;
+        chatHistory.push({ role: 'assistant', content: finalContent });
 
     } catch (error) {
-        console.error('❌ Errore:', error);
-        appendUserMessage(`Errore di sistema: ${error.message}`, 'ai');
+        console.error('❌ Errore API:', error);
+        appendUserMessage(`Errore di connessione: ${error.message}`, 'ai');
         chatHistory.pop(); 
     } finally {
         toggleLoading(false);
@@ -155,7 +157,7 @@ async function handleSendMessage() {
 }
 
 /**
- * Helper per il messaggio utente (statico)
+ * Utility per il testo utente
  */
 function appendUserMessage(content, sender = 'user') {
     const msgDiv = document.createElement('div');
