@@ -1,5 +1,5 @@
 /**
- * Gestore principale dell'invio (Metodo Completo - Parser Riparato e Anti-Lag)
+ * Gestore principale dell'invio (Metodo Completo Ottimizzato)
  */
 async function handleSendMessage() {
     const text = userInput.value.trim();
@@ -12,11 +12,10 @@ async function handleSendMessage() {
     toggleLoading(true);
 
     let msgDiv = null;
-    let isStreamActive = true; 
 
     try {
         if (!window.CONFIG || !window.CONFIG.API_KEY) {
-            throw new Error("Dati di configurazione mancanti. Verifica API_KEY e MODEL.");
+            throw new Error("Dati di configurazione mancanti.");
         }
 
         console.log(`📡 Contattando OpenRouter per il modello: ${window.CONFIG.MODEL}...`);
@@ -44,6 +43,7 @@ async function handleSendMessage() {
             throw new Error(errorData.error?.message || `Errore HTTP ${response.status}`);
         }
 
+        // ISTANZIAZIONE DEL PREFAB UI
         msgDiv = document.createElement('div');
         msgDiv.classList.add('message', 'ai');
         
@@ -51,15 +51,16 @@ async function handleSendMessage() {
         if (liveReasoning) msgDiv.appendChild(liveReasoning.container);
         
         const textNode = document.createElement('div');
+        // FIX: Assicura che i ritorni a capo del codice non vengano ignorati dal DOM
         textNode.style.whiteSpace = "pre-wrap"; 
         textNode.style.fontFamily = "inherit";
-        textNode.style.wordBreak = "break-word"; // Evita che righe di codice troppo lunghe rompano l'UI
         textNode.textContent = "▮";
         msgDiv.appendChild(textNode);
         
         messageArea.appendChild(msgDiv);
         messageArea.scrollTop = messageArea.scrollHeight;
 
+        // LETTURA DELLO STREAM
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
@@ -68,71 +69,45 @@ async function handleSendMessage() {
         let rawContentBuffer = "";
         let receivedValidData = false;
 
-        let displayContent = "";
-        let displayReasoning = "";
+        // FIX: Throttling per evitare lag dell'interfaccia grafica
+        let lastScrollUpdate = Date.now();
 
-        // --- MOTORE DI RENDERING ANTI-LAG ---
-        let renderRequested = false;
-        const updateUI = () => {
-            if (!isStreamActive) return;
-            
-            if (liveReasoning && displayReasoning) {
-                liveReasoning.updateText(displayReasoning);
-            } else if (displayReasoning) {
-                let reasoningEl = msgDiv.querySelector('.reasoning-fallback');
-                if (!reasoningEl) {
-                    reasoningEl = document.createElement('div');
-                    reasoningEl.className = 'reasoning-fallback';
-                    reasoningEl.style.cssText = 'color:#9ca3af; font-size:12px; border-left:2px solid #374151; padding-left:8px; margin-bottom:8px; white-space:pre-wrap';
-                    msgDiv.insertBefore(reasoningEl, textNode);
-                }
-                reasoningEl.textContent = `💭 ${displayReasoning}`;
-            }
-
-            textNode.textContent = displayContent.trimStart() + " ▮";
-            messageArea.scrollTop = messageArea.scrollHeight;
-            renderRequested = false;
-        };
-
-        const requestRender = () => {
-            if (!renderRequested) {
-                renderRequested = true;
-                requestAnimationFrame(updateUI);
-            }
-        };
-
-        // --- LETTURA STREAM LINEARE ---
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             
             buffer += decoder.decode(value, { stream: true });
-            
-            // RIPRISTINATA la logica sicura del \n per prevenire caricamenti infiniti
-            let lines = buffer.split('\n');
-            buffer = lines.pop(); 
 
-            for (let line of lines) {
-                line = line.trim();
+            // FIX: Parser SSE robusto che non frammenta i pacchetti JSON contenenti codice
+            let newlineIndex;
+            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                let line = buffer.slice(0, newlineIndex).trim();
+                buffer = buffer.slice(newlineIndex + 1);
+                
                 if (!line || line.startsWith(':')) continue;
 
                 if (line.includes('"error"')) {
-                    throw new Error("Il server ha segnalato un errore nel flusso di rete.");
+                    console.error("❌ Il server ha inviato un errore nello stream:", line);
+                    throw new Error("Errore interno del server durante la generazione.");
                 }
 
                 if (line.startsWith('data: ')) {
-                    const dataStr = line.substring(6).trim();
+                    const dataStr = line.substring(6);
                     if (dataStr === '[DONE]') continue;
                     
                     try {
                         const dataObj = JSON.parse(dataStr);
-                        const delta = dataObj.choices?.[0]?.delta;
+                        const delta = dataObj.choices[0]?.delta;
                         
                         if (!delta) continue;
                         receivedValidData = true;
 
                         if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
                         if (delta.content) rawContentBuffer += delta.content;
+
+                        // PARSER SEMPLIFICATO E SICURO per tag <think>
+                        let displayContent = "";
+                        let displayReasoning = "";
 
                         const thinkStart = rawContentBuffer.indexOf('<think>');
                         if (thinkStart !== -1) {
@@ -146,48 +121,71 @@ async function handleSendMessage() {
                             }
                         } else {
                             displayContent = rawContentBuffer;
-                            displayReasoning = "";
                         }
 
-                        displayReasoning = [nativeReasoningBuffer, displayReasoning].filter(Boolean).join("\n").trim();
-                        
-                        // Chiama l'aggiornamento UI senza congelare il thread
-                        requestRender();
+                        const finalReasoning = [nativeReasoningBuffer, displayReasoning]
+                            .filter(Boolean)
+                            .join("\n")
+                            .trim();
+
+                        if (finalReasoning) {
+                            if (liveReasoning) {
+                                liveReasoning.updateText(finalReasoning);
+                            } else {
+                                let reasoningEl = msgDiv.querySelector('.reasoning-fallback');
+                                if (!reasoningEl) {
+                                    reasoningEl = document.createElement('div');
+                                    reasoningEl.className = 'reasoning-fallback';
+                                    reasoningEl.style.cssText = 'color:#9ca3af; font-size:12px; border-left:2px solid #374151; padding-left:8px; margin-bottom:8px; white-space:pre-wrap';
+                                    msgDiv.insertBefore(reasoningEl, textNode);
+                                }
+                                reasoningEl.textContent = `💭 ${finalReasoning}`;
+                            }
+                        }
+
+                        textNode.textContent = displayContent.trimStart() + " ▮";
+
+                        // Aggiorna lo scroll solo ogni 100ms per non congelare il browser
+                        const now = Date.now();
+                        if (now - lastScrollUpdate > 100) {
+                            messageArea.scrollTop = messageArea.scrollHeight;
+                            lastScrollUpdate = now;
+                        }
                         
                     } catch (e) {
-                        // Salta il pacchetto rotto senza fare crashare la chat
+                        // Ignora silenziosamente solo i frammenti JSON temporaneamente spezzati
                     }
                 }
             }
         }
 
-        // --- PULIZIA FINALE ---
-        isStreamActive = false;
-        let finalContent = displayContent.trim();
+        // --- FINE STREAM E GARBAGE COLLECTION ---
+        let finalContent = textNode.textContent.replace(" ▮", "").replace("▮", "").trim();
         textNode.textContent = finalContent;
-        messageArea.scrollTop = messageArea.scrollHeight;
+        messageArea.scrollTop = messageArea.scrollHeight; // Scroll finale garantito
 
         if (liveReasoning) {
             const hasReasoning = (nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
             liveReasoning.finish(hasReasoning);
         }
 
-        if (!receivedValidData || (finalContent === "" && displayReasoning === "")) {
-            throw new Error("Nessun dato valido ricevuto (risposta vuota).");
+        if (!receivedValidData || (finalContent === "" && nativeReasoningBuffer === "" && !rawContentBuffer.includes('<think>'))) {
+            throw new Error("Ricevuta risposta vuota dal server.");
         } else {
             chatHistory.push({ role: 'assistant', content: finalContent });
         }
 
     } catch (error) {
         console.error('❌ Eccezione fatale nel loop di rete:', error);
-        isStreamActive = false;
         
         if (msgDiv && msgDiv.parentNode) {
-            if (msgDiv.textContent === "▮" || msgDiv.textContent === "") {
+            if (msgDiv.textContent === "▮") {
+                // Se non ha stampato nulla, elimina il blocco
                 messageArea.removeChild(msgDiv);
             } else {
+                // Se si è interrotto a metà codice, mostra l'errore sotto il testo parziale
                 const errorAlert = document.createElement('div');
-                errorAlert.style.cssText = "color: #ef4444; font-size: 14px; margin-top: 10px; font-weight: bold;";
+                errorAlert.style.cssText = "color: #ef4444; font-size: 14px; margin-top: 10px;";
                 errorAlert.textContent = `[Rete Disconnessa: ${error.message}]`;
                 msgDiv.appendChild(errorAlert);
             }
@@ -195,6 +193,7 @@ async function handleSendMessage() {
             appendUserMessage(`Errore di sistema: ${error.message}`, 'ai');
         }
         
+        // Rimuove l'ultimo messaggio inviato alla history per non corrompere la memoria del modello
         chatHistory.pop();
     } finally {
         toggleLoading(false);
