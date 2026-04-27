@@ -16,7 +16,7 @@ if (!sendBtn || !userInput || !messageArea) {
     sendBtn.addEventListener('click', handleSendMessage);
     userInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault(); // Evita ritorni a capo accidentali
+            e.preventDefault();
             handleSendMessage();
         }
     });
@@ -56,7 +56,7 @@ function toggleLoading(isLoading) {
 }
 
 /**
- * Gestore principale dell'invio (Metodo Completo Definitivo)
+ * Gestore principale dell'invio
  */
 async function handleSendMessage() {
     console.log("▶️ Tentativo di invio messaggio...");
@@ -79,7 +79,6 @@ async function handleSendMessage() {
     let isStreamActive = true; 
 
     try {
-        // Controllo di sicurezza rigoroso sulla configurazione
         if (typeof window.CONFIG === 'undefined') throw new Error("window.CONFIG non è definito.");
         if (!window.CONFIG.API_KEY) throw new Error("API_KEY mancante nella configurazione.");
         if (!window.CONFIG.MODEL) throw new Error("MODEL mancante nella configurazione.");
@@ -90,7 +89,7 @@ async function handleSendMessage() {
             model: window.CONFIG.MODEL,
             messages: chatHistory,
             stream: true,
-            include_reasoning: true,
+            include_reasoning: true
         };
 
         const response = await fetch(window.CONFIG.API_URL, {
@@ -169,10 +168,11 @@ async function handleSendMessage() {
         };
 
         // Lettura Stream
+        let chunkCount = 0;
         while (true) {
             const { done, value } = await reader.read();
             if (done) {
-                console.log("⏹️ Stream completato dal server.");
+                console.log(`⏹️ Stream completato. Chunk totali ricevuti: ${chunkCount}`);
                 break;
             }
             
@@ -190,19 +190,33 @@ async function handleSendMessage() {
 
                 if (line.startsWith('data: ')) {
                     const dataStr = line.substring(6).trim();
-                    if (dataStr === '[DONE]') continue;
+                    if (dataStr === '[DONE]') {
+                        console.log("🏁 Ricevuto [DONE] dal server.");
+                        continue;
+                    }
                     
                     try {
                         const dataObj = JSON.parse(dataStr);
                         const delta = dataObj.choices?.[0]?.delta;
-                        
+
+                        // ─── LOG DIAGNOSTICO ───────────────────────────────────────
+                        // Mostra ogni delta ricevuto per capire la struttura di OpenRouter.
+                        // Rimuovi questo blocco una volta che il reasoning funziona.
+                        if (delta && Object.keys(delta).length > 0) {
+                            chunkCount++;
+                            console.log(`📦 Delta #${chunkCount}:`, JSON.stringify(delta));
+                        }
+                        // ──────────────────────────────────────────────────────────
+
                         if (!delta) continue;
                         receivedValidData = true;
 
-                        if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
+                        // Legge reasoning sia da campo nativo che da reasoning_content (OpenRouter)
+                        if (delta.reasoning)         nativeReasoningBuffer += delta.reasoning;
                         if (delta.reasoning_content) nativeReasoningBuffer += delta.reasoning_content;
-                        if (delta.content) rawContentBuffer += delta.content;
+                        if (delta.content)           rawContentBuffer += delta.content;
 
+                        // Gestione tag <think> inline nel content
                         const thinkStart = rawContentBuffer.indexOf('<think>');
                         if (thinkStart !== -1) {
                             const thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
@@ -222,7 +236,7 @@ async function handleSendMessage() {
                         requestRender();
                         
                     } catch (e) {
-                        // Ignora i frammenti spezzati in modo sicuro
+                        console.warn("⚠️ Chunk non parsabile ignorato:", line);
                     }
                 }
             }
@@ -238,6 +252,12 @@ async function handleSendMessage() {
             const hasReasoning = (nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
             liveReasoning.finish(hasReasoning);
         }
+
+        // Report finale in console
+        console.log("📊 REPORT FINALE:");
+        console.log("   → nativeReasoningBuffer:", nativeReasoningBuffer.substring(0, 200) || "(vuoto)");
+        console.log("   → rawContentBuffer:", rawContentBuffer.substring(0, 200) || "(vuoto)");
+        console.log("   → finalContent:", finalContent.substring(0, 200) || "(vuoto)");
 
         if (!receivedValidData || (finalContent === "" && displayReasoning === "")) {
             throw new Error("Il server ha chiuso la connessione senza inviare testo.");
@@ -263,7 +283,7 @@ async function handleSendMessage() {
             appendUserMessage(`Errore di sistema: ${error.message}`, 'ai');
         }
         
-        chatHistory.pop(); // Rimuove l'ultimo messaggio per evitare di corrompere la memoria
+        chatHistory.pop();
     } finally {
         toggleLoading(false);
     }
