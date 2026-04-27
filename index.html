@@ -3,31 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Il Tuo Nome - Biglietto da Visita</title>
+    <title>Nemotron 3 Super Chat</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-    <div class="card-container">
-        <header class="profile-header">
-            <img src="https://via.placeholder.com/150" alt="Foto di Profilo" class="profile-img">
-            <h1>Mario Rossi</h1>
-            <h2>Sviluppatore Web & Designer</h2>
+    <div id="chat-container">
+        <header>
+            <h1>Nemotron 3 Super</h1>
+            <div class="status-indicator">Online</div>
         </header>
-
-        <section class="about-section">
-            <p>
-                Ciao! Sono un professionista appassionato di tecnologia e design. 
-                Aiuto le aziende a costruire esperienze digitali uniche, veloci e accessibili.
-            </p>
-        </section>
-
-        <footer class="contact-footer">
-            <a href="mailto:tuamail@esempio.com" class="btn">Scrivimi un'Email</a>
-            <a href="https://linkedin.com/in/tuoprofilo" target="_blank" class="btn btn-outline">Profilo LinkedIn</a>
-            <a href="https://github.com/tuoprofilo" target="_blank" class="btn btn-outline">Progetti su GitHub</a>
-        </footer>
+        <div id="messages" class="message-area">
+            </div>
+        <div id="input-area">
+            <input type="text" id="user-input" placeholder="Scrivi un messaggio..." autocomplete="off">
+            <button id="send-btn">
+                Invia
+            </button>
+        </div>
     </div>
-
+    <script src="script.js"></script>
 </body>
 </html>
