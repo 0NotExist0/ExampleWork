@@ -91,7 +91,6 @@ async function handleSendMessage() {
             messages: chatHistory,
             stream: true,
             include_reasoning: true,
-            ...(isReasoningModel(window.CONFIG.MODEL) && { include_reasoning: true })
         };
 
         const response = await fetch(window.CONFIG.API_URL, {
