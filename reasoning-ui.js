@@ -1,19 +1,20 @@
 /**
- * Componente Selezione Modelli Mobile-Friendly
+ * Script Selezione Modelli Finale: Gerarchia Mobile-First + Sistema Preferiti Persistente.
  */
 
 async function initModelSelector() {
     const header = document.querySelector('header');
     if (!header) return;
 
+    // --- SETUP UI ---
     const rootContainer = document.createElement('div');
     rootContainer.id = 'model-menu-root';
     
     const mainTrigger = document.createElement('div');
     mainTrigger.className = 'menu-item';
     mainTrigger.innerHTML = `
-        <span>📂 <b>Scegli Modello</b></span>
-        <span id="active-model-name" style="color:#60a5fa; font-size:11px; margin: 0 10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">...</span>
+        <span>📂 <b>Catalogo & Preferiti</b></span>
+        <span id="active-model-name" style="color:#60a5fa; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px;">Caricamento...</span>
         <span class="arrow">▶</span>
     `;
     
@@ -24,31 +25,40 @@ async function initModelSelector() {
     rootContainer.appendChild(mainSubmenu);
     header.parentNode.insertBefore(rootContainer, header.nextSibling);
 
-    mainTrigger.onclick = () => {
-        mainTrigger.classList.toggle('open');
-        // Se apriamo il menu, scrolliamo in cima
-        if(mainTrigger.classList.contains('open')) rootContainer.scrollTop = 0;
-    };
+    mainTrigger.onclick = () => mainTrigger.classList.toggle('open');
+
+    // --- DATI & PREFERITI ---
+    let allModels = [];
+    let favoriteIds = JSON.parse(localStorage.getItem('nemotron_favorites')) || [];
 
     try {
         const response = await fetch('https://openrouter.ai/api/v1/models');
         const data = await response.json();
-        const allModels = data.data.sort((a, b) => a.id.localeCompare(b.id));
+        allModels = data.data.sort((a, b) => a.id.localeCompare(b.id));
         
-        buildHierarchy(allModels, mainSubmenu, mainTrigger);
-        
+        renderAll();
         if (window.CONFIG) updateGlobalUI(window.CONFIG.MODEL);
-    } catch (error) {
-        mainTrigger.innerHTML = "<span>❌ Errore Caricamento</span>";
-    }
+    } catch (e) { mainTrigger.innerHTML = "<span>❌ Errore di Rete</span>"; }
 
-    function buildHierarchy(models, container, rootBtn) {
+    function renderAll() {
+        mainSubmenu.innerHTML = '';
+        
+        // 1. CARTELLA PREFERITI (Sempre in alto)
+        const favFolderBtn = createFolderNode("⭐ I Miei Preferiti", mainSubmenu);
+        favFolderBtn.classList.add('folder-fav');
+        const favSubmenu = document.createElement('div');
+        favSubmenu.className = 'submenu';
+        mainSubmenu.appendChild(favSubmenu);
+
+        renderFavoriteLeaves(favSubmenu);
+
+        // 2. GERARCHIA CATALOGO COMPLETO
         const tree = {
             "🟢 GRATIS": { "Standard": [], "Reasoning": [] },
             "🟡 PREMIUM": { "Standard": [], "Reasoning": [] }
         };
 
-        models.forEach(m => {
+        allModels.forEach(m => {
             const isFree = (m.pricing?.prompt === "0" || m.id.includes(':free'));
             const isReasoning = m.id.toLowerCase().includes('r1') || m.id.toLowerCase().includes('reasoning') || m.name.toLowerCase().includes('think');
             const branch = isFree ? "🟢 GRATIS" : "🟡 PREMIUM";
@@ -56,50 +66,90 @@ async function initModelSelector() {
             tree[branch][leaf].push(m);
         });
 
-        for (let folderName in tree) {
-            const folderBtn = createFolderNode(folderName, container);
-            const folderContent = document.createElement('div');
-            folderContent.className = 'submenu';
-            container.appendChild(folderContent);
+        for (let branch in tree) {
+            const branchBtn = createFolderNode(branch, mainSubmenu);
+            const branchSub = document.createElement('div');
+            branchSub.className = 'submenu';
+            mainSubmenu.appendChild(branchSub);
 
-            for (let subFolderName in tree[folderName]) {
-                const modelList = tree[folderName][subFolderName];
-                if (modelList.length === 0) continue;
+            for (let leaf in tree[branch]) {
+                if (tree[branch][leaf].length === 0) continue;
+                const leafBtn = createFolderNode(leaf, branchSub);
+                const leafSub = document.createElement('div');
+                leafSub.className = 'submenu';
+                branchSub.appendChild(leafSub);
 
-                const subFolderBtn = createFolderNode(subFolderName, folderContent);
-                const subFolderContent = document.createElement('div');
-                subFolderContent.className = 'submenu';
-                folderContent.appendChild(subFolderContent);
-
-                modelList.forEach(model => {
-                    const modelItem = document.createElement('div');
-                    modelItem.className = 'model-leaf';
-                    modelItem.innerText = model.name;
-                    
-                    modelItem.onclick = (e) => {
-                        e.stopPropagation();
-                        if (window.CONFIG) {
-                            window.CONFIG.MODEL = model.id;
-                            updateGlobalUI(model.id);
-                        }
-                        rootBtn.classList.remove('open'); // Chiude il menu dopo la scelta
-                    };
-                    subFolderContent.appendChild(modelItem);
+                tree[branch][leaf].forEach(model => {
+                    createModelLeaf(model, leafSub, () => renderFavoriteLeaves(favSubmenu));
                 });
             }
         }
     }
 
+    // --- FUNZIONI CREAZIONE NODI ---
+
     function createFolderNode(label, parent) {
         const div = document.createElement('div');
         div.className = 'menu-item';
         div.innerHTML = `<span>${label}</span> <span class="arrow">▶</span>`;
-        div.onclick = (e) => {
-            e.stopPropagation();
-            div.classList.toggle('open');
-        };
+        div.onclick = (e) => { e.stopPropagation(); div.classList.toggle('open'); };
         parent.appendChild(div);
         return div;
+    }
+
+    function createModelLeaf(model, parent, onFavChange) {
+        const leaf = document.createElement('div');
+        leaf.className = 'menu-item model-leaf';
+        
+        const isFav = favoriteIds.includes(model.id);
+
+        leaf.innerHTML = `
+            <span class="model-name">${model.name}</span>
+            <button class="fav-toggle ${isFav ? 'active' : ''}" title="Aggiungi ai preferiti">★</button>
+        `;
+
+        // Click sul nome: Seleziona il modello
+        leaf.querySelector('.model-name').onclick = (e) => {
+            e.stopPropagation();
+            if (window.CONFIG) {
+                window.CONFIG.MODEL = model.id;
+                updateGlobalUI(model.id);
+            }
+            mainTrigger.classList.remove('open');
+        };
+
+        // Click sulla stella: Toggle preferito
+        leaf.querySelector('.fav-toggle').onclick = (e) => {
+            e.stopPropagation();
+            toggleFavorite(model.id);
+            onFavChange(); // Aggiorna la cartella preferiti
+            renderAll(); // Rerender per aggiornare lo stato delle stelle ovunque
+        };
+
+        parent.appendChild(leaf);
+    }
+
+    function renderFavoriteLeaves(container) {
+        container.innerHTML = '';
+        if (favoriteIds.length === 0) {
+            container.innerHTML = '<div class="model-leaf" style="font-style:italic; opacity:0.5;">Nessun preferito...</div>';
+            return;
+        }
+
+        favoriteIds.forEach(id => {
+            const mData = allModels.find(m => m.id === id) || { name: id, id: id };
+            createModelLeaf(mData, container, () => renderFavoriteLeaves(container));
+        });
+    }
+
+    // --- LOGICA PREFERITI ---
+    function toggleFavorite(id) {
+        if (favoriteIds.includes(id)) {
+            favoriteIds = favoriteIds.filter(favId => favId !== id);
+        } else {
+            favoriteIds.push(id);
+        }
+        localStorage.setItem('nemotron_favorites', JSON.stringify(favoriteIds));
     }
 
     function updateGlobalUI(modelId) {
