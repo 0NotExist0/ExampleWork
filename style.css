@@ -1,106 +1,145 @@
-/* Resetta i margini e imposta un font pulito */
+:root {
+    --bg-color: #0f172a;
+    --container-bg: #1e293b;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --accent-color: #3b82f6;
+    --accent-hover: #2563eb;
+    --message-user: #3b82f6;
+    --message-ai: #334155;
+}
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-/* Sfondo della pagina e centratura della card */
 body {
-    background-color: #f0f2f5;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    height: 100vh;
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 100vh;
-    color: #333;
 }
 
-/* Stile principale del biglietto da visita */
-.card-container {
-    background-color: #ffffff;
-    width: 90%;
-    max-width: 420px;
-    padding: 40px 30px;
-    border-radius: 20px;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-    text-align: center;
-    transition: transform 0.3s ease;
-}
-
-.card-container:hover {
-    transform: translateY(-5px);
-}
-
-/* Immagine di profilo */
-.profile-img {
-    width: 130px;
-    height: 130px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 4px solid #007BFF;
-    margin-bottom: 20px;
-    box-shadow: 0 5px 15px rgba(0, 123, 255, 0.2);
-}
-
-/* Testi dell'intestazione */
-.profile-header h1 {
-    font-size: 26px;
-    color: #1a1a1a;
-    margin-bottom: 5px;
-}
-
-.profile-header h2 {
-    font-size: 16px;
-    font-weight: 500;
-    color: #6c757d;
-    margin-bottom: 25px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
-/* Testo della biografia */
-.about-section p {
-    font-size: 15px;
-    line-height: 1.6;
-    color: #555;
-    margin-bottom: 35px;
-}
-
-/* Contenitore dei pulsanti */
-.contact-footer {
+#chat-container {
+    width: 100%;
+    max-width: 900px;
+    height: 90vh;
+    background-color: var(--container-bg);
+    border-radius: 16px;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    overflow: hidden;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }
 
-/* Stile dei pulsanti */
-.btn {
-    display: block;
-    text-decoration: none;
-    color: #ffffff;
-    background-color: #007BFF;
-    padding: 14px 20px;
-    border-radius: 10px;
+header {
+    padding: 20px;
+    background-color: rgba(15, 23, 42, 0.5);
+    border-bottom: 1px solid #334155;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+header h1 {
+    font-size: 1.25rem;
     font-weight: 600;
-    font-size: 15px;
-    transition: all 0.3s ease;
 }
 
-.btn:hover {
-    background-color: #0056b3;
-    transform: scale(1.02);
+.status-indicator {
+    font-size: 0.8rem;
+    color: #10b981;
+    display: flex;
+    align-items: center;
 }
 
-/* Pulsanti secondari (outline) */
-.btn-outline {
-    background-color: transparent;
-    color: #007BFF;
-    border: 2px solid #007BFF;
-    padding: 12px 20px; /* Ridotto leggermente per compensare il bordo */
+.status-indicator::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background-color: #10b981;
+    border-radius: 50%;
+    margin-right: 8px;
 }
 
-.btn-outline:hover {
-    background-color: #007BFF;
-    color: #ffffff;
+.message-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.message {
+    max-width: 80%;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    word-wrap: break-word;
+}
+
+.user {
+    align-self: flex-end;
+    background-color: var(--message-user);
+    color: white;
+    border-bottom-right-radius: 2px;
+}
+
+.ai {
+    align-self: flex-start;
+    background-color: var(--message-ai);
+    color: var(--text-primary);
+    border-bottom-left-radius: 2px;
+}
+
+#input-area {
+    padding: 20px;
+    background-color: rgba(15, 23, 42, 0.3);
+    display: flex;
+    gap: 12px;
+    border-top: 1px solid #334155;
+}
+
+input {
+    flex: 1;
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: white;
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+input:focus {
+    border-color: var(--accent-color);
+}
+
+button {
+    background-color: var(--accent-color);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0 20px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+button:hover {
+    background-color: var(--accent-hover);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
