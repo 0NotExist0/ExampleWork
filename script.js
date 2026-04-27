@@ -3,13 +3,14 @@
  * Integrazione tramite OpenRouter API
  */
 
-const CONFIG = {
+// Creiamo un namespace globale accessibile da tutti i file JS
+window.CONFIG = {
     API_KEY: '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',
     API_URL: 'https://openrouter.ai/api/v1/chat/completions',
-    MODEL: 'nvidia/nemotron-4-340b-instruct'
+    MODEL: 'nvidia/nemotron-4-340b-instruct' // Modello di avvio predefinito
 };
 
-// Stato dell'applicazione per mantenere il contesto
+// Stato dell'applicazione
 let chatHistory = [];
 
 // Elementi DOM
@@ -24,26 +25,30 @@ async function handleSendMessage() {
     const text = userInput.value.trim();
     if (!text) return;
 
-    // 1. Aggiorna UI con messaggio utente
+    // 1. Aggiorna UI
     appendMessage(text, 'user');
     userInput.value = '';
     
-    // 2. Prepara il payload per l'API aggiornando la history
+    // 2. Prepara il payload
     chatHistory.push({ role: 'user', content: text });
     
     toggleLoading(true);
 
     try {
-        const response = await fetch(CONFIG.API_URL, {
+        // Stampiamo in console il modello esatto che stiamo per usare
+        console.log("Inviando richiesta API usando il modello:", window.CONFIG.MODEL);
+
+        const response = await fetch(window.CONFIG.API_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${CONFIG.API_KEY}`,
+                'Authorization': `Bearer ${window.CONFIG.API_KEY}`,
                 'HTTP-Referer': window.location.href,
                 'X-Title': 'Nemotron Web UI'
             },
             body: JSON.stringify({
-                model: CONFIG.MODEL,
+                // Legge dinamicamente il modello aggiornato dal secondo script!
+                model: window.CONFIG.MODEL, 
                 messages: chatHistory
             })
         });
@@ -56,35 +61,32 @@ async function handleSendMessage() {
         const data = await response.json();
         const aiResponse = data.choices[0].message.content;
 
-        // 3. Aggiorna UI con risposta AI e salva in history
+        // 3. Mostra risposta
         appendMessage(aiResponse, 'ai');
         chatHistory.push({ role: 'assistant', content: aiResponse });
 
     } catch (error) {
         console.error('Chat Error:', error);
-        appendMessage(`Errore: ${error.message}. Verifica la tua API Key o la connessione.`, 'ai');
-        // Rimuovi l'ultimo input utente dalla history in caso di errore
-        chatHistory.pop();
+        appendMessage(`Errore API: ${error.message}`, 'ai');
+        chatHistory.pop(); // Rimuove l'ultimo messaggio per non corrompere la cronologia
     } finally {
         toggleLoading(false);
     }
 }
 
 /**
- * Aggiunge un blocco di testo (fumetto) all'area chat
+ * Aggiunge il fumetto alla chat
  */
 function appendMessage(content, sender) {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', sender);
     msgDiv.textContent = content;
     messageArea.appendChild(msgDiv);
-    
-    // Scroll automatico alla base
     messageArea.scrollTop = messageArea.scrollHeight;
 }
 
 /**
- * Disabilita/Abilita i controlli durante l'attesa di rete
+ * Gestione bottoni
  */
 function toggleLoading(isLoading) {
     userInput.disabled = isLoading;
@@ -92,11 +94,10 @@ function toggleLoading(isLoading) {
     if (!isLoading) userInput.focus();
 }
 
-// Event Listeners per mouse e tastiera
+// Listeners
 sendBtn.addEventListener('click', handleSendMessage);
 userInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') handleSendMessage();
 });
 
-// Focus iniziale per usabilità immediata
 userInput.focus();
