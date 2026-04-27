@@ -1,12 +1,12 @@
-/* Variabili con palette ottimizzata */
+/* Variabili con palette Cyberpunk Moderna (Nero e Verde Neon) */
 :root {
-    --bg-color: #0f172a;
-    --container-bg: #1e293b;
-    --text-primary: #f8fafc;
-    --accent-blue: #3b82f6;
-    --accent-green: #10b981;
-    --accent-orange: #f59e0b;
-    --border-color: #334155;
+    --bg-color: #050505; /* Nero profondo per lo sfondo principale */
+    --container-bg: #090d10; /* Tonalità scurissima con un leggero hint tecnico */
+    --text-primary: #d1e8da; /* Bianco spento con nota di verde per leggibilità */
+    --text-neon: #00ff66; /* Verde neon puro per i dettagli luminosi */
+    --accent-green-dark: #002b11; /* Verde scuro per i background dei messaggi */
+    --border-color: #004d26; /* Verde foresta per i confini spenti */
+    --glow-spread: rgba(0, 255, 102, 0.25);
     --header-height: 60px;
 }
 
@@ -18,13 +18,20 @@
 }
 
 body {
-    font-family: 'Inter', -apple-system, sans-serif;
+    /* Font monospace fallback per un tocco più hacker/tech */
+    font-family: 'Inter', 'Fira Code', 'Consolas', -apple-system, sans-serif;
     background-color: var(--bg-color);
+    
+    /* Griglia leggerissima di sfondo stile Cyberpunk/Matrix */
+    background-image: 
+        linear-gradient(rgba(0, 255, 102, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 255, 102, 0.03) 1px, transparent 1px);
+    background-size: 25px 25px; 
+    
     color: var(--text-primary);
-    /* Usa dvh per evitare il bug della barra degli indirizzi su mobile */
     height: 100dvh; 
     width: 100vw;
-    overflow: hidden; /* Impedisce il rimbalzo della pagina */
+    overflow: hidden; 
     display: flex;
     justify-content: center;
 }
@@ -32,135 +39,215 @@ body {
 #chat-container {
     width: 100%;
     max-width: 900px;
-    height: 100dvh; /* Occupa tutto lo schermo su mobile */
+    height: 100dvh;
     background-color: var(--container-bg);
     display: flex;
     flex-direction: column;
     position: relative;
+    border-left: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.9); /* Effetto profondità forte */
 }
 
-/* Header compatto per mobile */
+/* --- SCROLLBAR PERSONALIZZATA (WebKit) --- */
+::-webkit-scrollbar {
+    width: 6px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-color);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 0px; /* Squadrata */
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-neon);
+}
+
+/* Header stile terminale */
 header {
     height: var(--header-height);
-    padding: 0 15px;
-    background: rgba(15, 23, 42, 0.9);
-    border-bottom: 1px solid var(--border-color);
+    padding: 0 20px;
+    background: rgba(5, 5, 5, 0.95);
+    border-bottom: 1px solid var(--text-neon);
+    box-shadow: 0 4px 15px var(--glow-spread); /* Bagliore verde sotto l'header */
     display: flex;
     justify-content: space-between;
     align-items: center;
     z-index: 10;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
 }
 
-header h1 { font-size: 16px; }
-.status-indicator { font-size: 12px; }
+header h1 { 
+    font-size: 16px; 
+    color: var(--text-neon);
+    text-shadow: 0 0 8px var(--glow-spread);
+}
+
+.status-indicator { 
+    font-size: 12px; 
+    color: var(--text-neon);
+    font-weight: bold;
+}
 
 /* --- MENU NIDIFICATO SCROLLABILE --- */
 #model-menu-root {
-    background: #162031;
-    border-bottom: 2px solid var(--accent-blue);
-    max-height: 50dvh; /* Non copre mai più di metà schermo */
+    background: #06090b;
+    border-bottom: 1px solid var(--text-neon);
+    max-height: 50dvh; 
     overflow-y: auto;
     z-index: 9;
+    box-shadow: inset 0 -10px 20px rgba(0, 0, 0, 0.8);
 }
 
 .menu-item {
-    padding: 16px; /* Tap target più grande per dita */
-    background: #0f172a;
-    border-bottom: 1px solid #1e293b;
+    padding: 16px 20px; 
+    background: var(--bg-color);
+    border-bottom: 1px solid #111;
     cursor: pointer;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    transition: background 0.2s ease, padding-left 0.2s ease;
 }
 
-.arrow { transition: transform 0.3s; font-size: 10px; }
-.menu-item.open .arrow { transform: rotate(90deg); color: var(--accent-blue); }
+.menu-item:hover {
+    background: var(--accent-green-dark);
+    padding-left: 25px; /* Effetto slide on hover */
+    border-left: 3px solid var(--text-neon);
+}
+
+.arrow { 
+    transition: transform 0.3s; 
+    font-size: 10px; 
+    color: var(--border-color);
+}
+
+.menu-item.open .arrow { 
+    transform: rotate(90deg); 
+    color: var(--text-neon); 
+    text-shadow: 0 0 5px var(--text-neon);
+}
 
 .submenu {
     display: none;
-    background: #1e293b;
-    border-left: 4px solid var(--accent-blue);
+    background: var(--container-bg);
+    border-left: 2px dashed var(--border-color);
+    margin-left: 10px;
 }
 
-.menu-item.open + .submenu { display: block; }
+.menu-item.open + .submenu { 
+    display: block; 
+}
 
 .model-leaf {
-    padding: 14px 20px 14px 30px;
-    background: #1e293b;
-    border-bottom: 1px solid #2d3a4f;
+    padding: 14px 20px 14px 20px;
+    background: transparent;
+    border-bottom: 1px dashed #15221a;
     font-size: 14px;
+    transition: color 0.2s, background 0.2s;
+}
+
+.model-leaf:hover {
+    color: var(--text-neon);
+    background: rgba(0, 255, 102, 0.05);
 }
 
 /* --- AREA MESSAGGI --- */
 .message-area {
     flex: 1;
     overflow-y: auto;
-    padding: 15px;
+    padding: 20px 15px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    /* Smooth scrolling per iOS */
+    gap: 18px;
     -webkit-overflow-scrolling: touch; 
 }
 
-/* Fumetti messaggi ottimizzati */
+/* Fumetti messaggi squadrati e rigidi */
 .message {
     max-width: 85%;
-    padding: 12px 16px;
-    border-radius: 18px;
+    padding: 14px 18px;
+    border-radius: 2px; /* Addio bordi arrotondati, benvenuto cyberpunk */
     font-size: 15px;
-    line-height: 1.4;
+    line-height: 1.5;
+    position: relative;
 }
 
 .user {
     align-self: flex-end;
-    background-color: var(--accent-blue);
-    border-bottom-right-radius: 4px;
+    background-color: var(--accent-green-dark);
+    color: var(--text-neon);
+    border: 1px solid var(--border-color);
+    border-right: 4px solid var(--text-neon); /* Accento laterale luminoso */
+    box-shadow: -5px 5px 15px rgba(0, 0, 0, 0.5);
 }
 
 .ai {
     align-self: flex-start;
-    background-color: #334155;
-    border-bottom-left-radius: 4px;
+    background-color: #0c1217;
+    border: 1px solid #1a2620;
+    border-left: 4px solid var(--text-neon);
+    box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.5);
 }
 
 /* --- INPUT FISSO IN BASSO --- */
 #input-area {
-    padding: 12px;
-    background: #1e293b;
+    padding: 15px;
+    background: rgba(5, 5, 5, 0.85);
+    backdrop-filter: blur(8px); /* Effetto vetro oscurato */
     display: flex;
-    gap: 8px;
+    gap: 12px;
     border-top: 1px solid var(--border-color);
-    padding-bottom: calc(12px + env(safe-area-inset-bottom)); /* Gestisce la "tacca" degli iPhone */
+    padding-bottom: calc(15px + env(safe-area-inset-bottom));
 }
 
 input#user-input {
     flex: 1;
-    background: #0f172a;
+    background: #020202;
     border: 1px solid var(--border-color);
-    padding: 14px;
-    border-radius: 25px; /* Look moderno a pillola */
-    color: white;
-    font-size: 16px; /* Evita lo zoom automatico su iOS */
+    padding: 14px 20px;
+    border-radius: 2px; /* Squadrato */
+    color: var(--text-neon);
+    font-size: 16px;
     outline: none;
+    transition: all 0.3s ease;
+    font-family: inherit;
+}
+
+input#user-input::placeholder {
+    color: #1a3a2a;
+}
+
+input#user-input:focus {
+    border-color: var(--text-neon);
+    box-shadow: 0 0 15px var(--glow-spread), inset 0 0 10px rgba(0, 255, 102, 0.05);
 }
 
 button#send-btn {
-    background: var(--accent-blue);
-    color: white;
-    border: none;
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
+    background: transparent;
+    color: var(--text-neon);
+    border: 1px solid var(--text-neon);
+    width: 52px;
+    height: 52px;
+    border-radius: 2px;
     cursor: pointer;
     display: flex;
     justify-content: center;
     align-items: center;
     font-weight: bold;
     flex-shrink: 0;
+    transition: all 0.2s ease;
 }
 
-/* Stili extra per i preferiti nel menu */
+button#send-btn:hover, button#send-btn:active {
+    background: var(--text-neon);
+    color: #000;
+    box-shadow: 0 0 15px var(--text-neon);
+}
+
+/* --- MENU PREFERITI --- */
 .model-leaf {
     display: flex !important;
     justify-content: space-between;
@@ -174,19 +261,21 @@ button#send-btn {
     font-size: 18px;
     cursor: pointer;
     padding: 5px;
-    color: #64748b;
-    transition: transform 0.2s;
+    color: #1a2620; /* Scuro quando spento */
+    transition: all 0.3s;
 }
 
 .fav-toggle.active {
-    color: #f59e0b;
-    filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.5));
+    color: var(--text-neon);
+    filter: drop-shadow(0 0 6px var(--text-neon));
 }
 
-.fav-toggle:active { transform: scale(1.3); }
+.fav-toggle:active { 
+    transform: scale(1.3); 
+}
 
 /* Cartella speciale preferiti */
 .folder-fav {
-    border-left-color: #f59e0b !important;
+    border-left-color: var(--text-neon) !important;
+    background: linear-gradient(90deg, rgba(0, 255, 102, 0.05) 0%, transparent 100%);
 }
-
