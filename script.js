@@ -1,5 +1,5 @@
 /**
- * Modulo Chat Principale (Core Logic con Streaming Resiliente)
+ * Modulo Chat Principale (Core Logic con Streaming Frame-Perfect)
  */
 
 let chatHistory = [];
@@ -8,7 +8,7 @@ const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 
-console.log("⚙️ script.js avviato con parser Streaming avanzato.");
+console.log("⚙️ script.js avviato con parser Streaming su base index.");
 
 if (!sendBtn || !userInput) {
     console.error("❌ Errore: Elementi UI non trovati!");
@@ -72,12 +72,11 @@ async function handleSendMessage() {
         messageArea.appendChild(msgDiv);
         messageArea.scrollTop = messageArea.scrollHeight;
 
-        // LETTURA DELLO STREAM
+        // LETTURA DELLO STREAM IN TEMPO REALE
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
         
-        // Variabili di accumulo globali (il nostro Buffer persistente)
         let nativeReasoningBuffer = "";
         let rawContentBuffer = "";
 
@@ -87,7 +86,7 @@ async function handleSendMessage() {
             
             buffer += decoder.decode(value, { stream: true });
             let lines = buffer.split('\n');
-            buffer = lines.pop(); // Tieni l'ultimo frammento incompleto in memoria
+            buffer = lines.pop(); 
 
             for (let line of lines) {
                 line = line.trim();
@@ -98,54 +97,63 @@ async function handleSendMessage() {
                     try {
                         const dataObj = JSON.parse(dataStr);
                         const delta = dataObj.choices[0]?.delta;
-
                         if (!delta) continue;
 
-                        // 1. Accumula dati in arrivo
-                        if (delta.reasoning) {
-                            nativeReasoningBuffer += delta.reasoning;
-                        }
-                        if (delta.content) {
-                            rawContentBuffer += delta.content;
-                        }
+                        // Accumula i chunk grezzi
+                        if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
+                        if (delta.content) rawContentBuffer += delta.content;
 
-                        // 2. Parser Dinamico: ricalcola cosa mostrare ad ogni frame
-                        let displayReasoning = nativeReasoningBuffer;
-                        let displayContent = rawContentBuffer;
-
-                        // Questa Regex intercetta il tag <think> sia che sia chiuso (</think>) 
-                        // sia che sia ancora aperto (|$), prevenendo tagli dovuti al lag di rete
-                        const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/i;
-                        const match = displayContent.match(thinkRegex);
-
-                        if (match) {
-                            // Estrae il pensiero dal buffer del contenuto
-                            displayReasoning += (displayReasoning ? "\n" : "") + match[1];
-                            // Nasconde il blocco testuale grezzo dalla risposta finale
-                            displayContent = displayContent.replace(thinkRegex, '').trimStart();
-                        }
+                        // PARSER ROBUSTO (Resiliente ai pacchetti tagliati)
+                        let cStr = "";
+                        let rStr = "";
+                        let curr = 0;
                         
-                        // 3. Aggiorna l'interfaccia
-                        if (displayReasoning && liveReasoning) {
-                            liveReasoning.updateText(displayReasoning);
+                        while(true) {
+                            let startTag = rawContentBuffer.indexOf('<think>', curr);
+                            if (startTag === -1) {
+                                // Nessun tag di inizio, tutto il resto è testo normale
+                                cStr += rawContentBuffer.substring(curr);
+                                break;
+                            }
+                            // Aggiungi il testo prima del <think>
+                            cStr += rawContentBuffer.substring(curr, startTag);
+                            
+                            let endTag = rawContentBuffer.indexOf('</think>', startTag + 7);
+                            if (endTag === -1) {
+                                // Tag aperto ma non ancora chiuso (stiamo ancora streammando il pensiero)
+                                rStr += rawContentBuffer.substring(startTag + 7);
+                                break;
+                            } else {
+                                // Tag aperto e chiuso
+                                rStr += rawContentBuffer.substring(startTag + 7, endTag) + "\n";
+                                curr = endTag + 8;
+                            }
                         }
-                        textNode.textContent = displayContent;
+
+                        let finalReasoning = (nativeReasoningBuffer + "\n" + rStr).trim();
+                        
+                        // AGGIORNAMENTO UI IN DIRETTA
+                        if (finalReasoning && liveReasoning) {
+                            liveReasoning.updateText(finalReasoning);
+                        }
+                        textNode.textContent = cStr.trimStart();
                         
                         messageArea.scrollTop = messageArea.scrollHeight;
                         
                     } catch (e) {
-                        // Salta JSON rotti senza interrompere il ciclo
+                        // Ignoriamo micro-errori JSON per non bloccare il loop
                     }
                 }
             }
         }
 
-        // Chiusura e salvataggio
-        if (liveReasoning) liveReasoning.finish();
+        // CHIUSURA STREAM (Update Finale)
+        if (liveReasoning) {
+            const hasReasoning = (nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
+            liveReasoning.finish(hasReasoning);
+        }
         
-        // Salviamo nella cronologia solo il testo finale depurato dai tag
-        const finalContent = textNode.textContent;
-        chatHistory.push({ role: 'assistant', content: finalContent });
+        chatHistory.push({ role: 'assistant', content: textNode.textContent });
 
     } catch (error) {
         console.error('❌ Errore API:', error);
@@ -157,7 +165,7 @@ async function handleSendMessage() {
 }
 
 /**
- * Utility per il testo utente
+ * Utility grafica
  */
 function appendUserMessage(content, sender = 'user') {
     const msgDiv = document.createElement('div');
