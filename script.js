@@ -21,6 +21,14 @@ if (!sendBtn || !userInput) {
 }
 
 /**
+ * Determina se un modello supporta il reasoning nativo
+ */
+function isReasoningModel(modelId) {
+    const id = modelId.toLowerCase();
+    return id.includes('r1') || id.includes('reasoning') || id.includes('think');
+}
+
+/**
  * Gestore principale dell'invio (Metodo Completo)
  */
 async function handleSendMessage() {
@@ -42,6 +50,15 @@ async function handleSendMessage() {
 
         console.log(`📡 Contattando OpenRouter per il modello: ${window.CONFIG.MODEL}...`);
 
+        // FIX 1: include_reasoning abilitato solo per i modelli che lo supportano,
+        // per evitare crash sui modelli free standard.
+        const requestBody = {
+            model: window.CONFIG.MODEL,
+            messages: chatHistory,
+            stream: true,
+            ...(isReasoningModel(window.CONFIG.MODEL) && { include_reasoning: true })
+        };
+
         const response = await fetch(window.CONFIG.API_URL, {
             method: 'POST',
             headers: {
@@ -50,11 +67,7 @@ async function handleSendMessage() {
                 'HTTP-Referer': window.location.href,
                 'X-Title': 'Nemotron Web UI'
             },
-            body: JSON.stringify({
-                model: window.CONFIG.MODEL, 
-                messages: chatHistory,
-                stream: true // Rimosso include_reasoning che fa crashare alcuni modelli free
-            })
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
@@ -83,7 +96,7 @@ async function handleSendMessage() {
         
         let nativeReasoningBuffer = "";
         let rawContentBuffer = "";
-        let receivedValidData = false; // Flag per controllare se il server ci sta ignorando
+        let receivedValidData = false;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -91,15 +104,13 @@ async function handleSendMessage() {
             
             buffer += decoder.decode(value, { stream: true });
             let lines = buffer.split('\n');
-            buffer = lines.pop(); // Salva l'ultimo pezzo incompleto
+            buffer = lines.pop();
 
             for (let line of lines) {
                 line = line.trim();
                 
-                // Ignora righe vuote e commenti di keep-alive del server
-                if (!line || line.startsWith(':')) continue; 
+                if (!line || line.startsWith(':')) continue;
 
-                // Se OpenRouter manda un errore testuale grezzo nello stream
                 if (line.includes('"error"')) {
                     console.error("❌ Il server ha inviato un errore nello stream:", line);
                     throw new Error("Errore interno del server durante la generazione.");
@@ -114,22 +125,23 @@ async function handleSendMessage() {
                         const delta = dataObj.choices[0]?.delta;
                         
                         if (!delta) continue;
-                        receivedValidData = true; // Abbiamo ricevuto almeno un byte utile!
+                        receivedValidData = true;
 
                         if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
                         if (delta.content) rawContentBuffer += delta.content;
 
-                        // PARSER SEMPLIFICATO E SICURO
+                        // PARSER SEMPLIFICATO E SICURO per tag <think>
                         let displayContent = "";
                         let displayReasoning = "";
 
-                        let thinkStart = rawContentBuffer.indexOf('<think>');
+                        const thinkStart = rawContentBuffer.indexOf('<think>');
                         if (thinkStart !== -1) {
-                            let thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
+                            const thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
                             if (thinkEnd !== -1) {
                                 displayContent = rawContentBuffer.substring(0, thinkStart) + rawContentBuffer.substring(thinkEnd + 8);
                                 displayReasoning = rawContentBuffer.substring(thinkStart + 7, thinkEnd);
                             } else {
+                                // Tag <think> aperto ma </think> non ancora arrivato
                                 displayContent = rawContentBuffer.substring(0, thinkStart);
                                 displayReasoning = rawContentBuffer.substring(thinkStart + 7);
                             }
@@ -137,18 +149,40 @@ async function handleSendMessage() {
                             displayContent = rawContentBuffer;
                         }
 
-                        let finalReasoning = (nativeReasoningBuffer + "\n" + displayReasoning).trim();
-                        
-                        // Aggiorna UI
-                        if (finalReasoning && liveReasoning) {
-                            liveReasoning.updateText(finalReasoning);
+                        // FIX 2: join pulito senza "\n" iniziale inutile
+                        const finalReasoning = [nativeReasoningBuffer, displayReasoning]
+                            .filter(Boolean)
+                            .join("\n")
+                            .trim();
+
+                        // FIX 3: Aggiorna UI reasoning con fallback testuale se ReasoningUI non è caricato
+                        if (finalReasoning) {
+                            if (liveReasoning) {
+                                liveReasoning.updateText(finalReasoning);
+                            } else {
+                                // Fallback: blocco testo grigio sopra la risposta
+                                let reasoningEl = msgDiv.querySelector('.reasoning-fallback');
+                                if (!reasoningEl) {
+                                    reasoningEl = document.createElement('div');
+                                    reasoningEl.className = 'reasoning-fallback';
+                                    reasoningEl.style.cssText = [
+                                        'color:#9ca3af',
+                                        'font-size:12px',
+                                        'border-left:2px solid #374151',
+                                        'padding-left:8px',
+                                        'margin-bottom:8px',
+                                        'white-space:pre-wrap'
+                                    ].join(';');
+                                    msgDiv.insertBefore(reasoningEl, textNode);
+                                }
+                                reasoningEl.textContent = `💭 ${finalReasoning}`;
+                            }
                         }
+
                         textNode.textContent = displayContent.trimStart() + " ▮";
-                        
                         messageArea.scrollTop = messageArea.scrollHeight;
                         
                     } catch (e) {
-                        // Stampiamo il pacchetto corrotto per indagini, ma non blocchiamo l'app
                         console.warn("⚠️ Pacchetto JSON ignorato perché corrotto:", dataStr);
                     }
                 }
@@ -164,14 +198,14 @@ async function handleSendMessage() {
             liveReasoning.finish(hasReasoning);
         }
 
-        // Failsafe: Distruggi il GameObject se non è arrivato nulla
+        // Failsafe: rimuove il blocco UI se non è arrivato nulla di utile
         if (!receivedValidData || (finalContent === "" && nativeReasoningBuffer === "" && !rawContentBuffer.includes('<think>'))) {
             console.warn("🗑️ Ricevuta risposta vuota dal server. Distruggo il Prefab UI.");
             if (msgDiv && msgDiv.parentNode) {
-                messageArea.removeChild(msgDiv); 
+                messageArea.removeChild(msgDiv);
             }
             appendUserMessage("⚠️ Il server (OpenRouter) è sovraccarico o il modello gratuito è offline in questo momento. Riprova tra poco.", 'ai');
-            chatHistory.pop(); 
+            chatHistory.pop();
         } else {
             chatHistory.push({ role: 'assistant', content: finalContent });
         }
@@ -179,13 +213,12 @@ async function handleSendMessage() {
     } catch (error) {
         console.error('❌ Eccezione fatale nel loop di rete:', error);
         
-        // Se c'è stato un crash, puliamo il fumetto "bloccato"
         if (msgDiv && msgDiv.parentNode && msgDiv.textContent === "▮") {
             messageArea.removeChild(msgDiv);
         }
         
         appendUserMessage(`Errore di sistema: ${error.message}`, 'ai');
-        chatHistory.pop(); 
+        chatHistory.pop();
     } finally {
         toggleLoading(false);
     }
