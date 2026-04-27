@@ -1,6 +1,6 @@
 /**
- * Script di Selezione Modelli con Sincronizzazione Totale.
- * Gestisce Catalogo, Preferiti e aggiornamento del Main Engine.
+ * Script di Selezione Modelli Categorizzato e User-Friendly.
+ * Organizza i modelli in Gratis/Premium e Standard/Pensanti.
  */
 
 async function initModelSelector() {
@@ -15,10 +15,10 @@ async function initModelSelector() {
     });
 
     const searchInput = document.createElement('input');
-    searchInput.placeholder = 'Cerca nel catalogo...';
+    searchInput.placeholder = 'Cerca nel catalogo (es: deepseek, llama...)';
     Object.assign(searchInput.style, {
-        padding: '10px', borderRadius: '8px', border: '1px solid #334155',
-        backgroundColor: '#0f172a', color: '#f8fafc', outline: 'none'
+        padding: '12px', borderRadius: '8px', border: '1px solid #334155',
+        backgroundColor: '#0f172a', color: '#f8fafc', outline: 'none', fontSize: '14px'
     });
 
     // Riga Catalogo
@@ -26,8 +26,8 @@ async function initModelSelector() {
     row1.style.display = 'flex'; row1.style.gap = '8px';
     const mainSelect = document.createElement('select');
     Object.assign(mainSelect.style, {
-        padding: '10px', borderRadius: '8px', border: '1px solid #334155',
-        backgroundColor: '#0f172a', color: '#f8fafc', flex: '1', cursor: 'pointer'
+        padding: '12px', borderRadius: '8px', border: '1px solid #334155',
+        backgroundColor: '#0f172a', color: '#f8fafc', flex: '1', cursor: 'pointer', outline: 'none'
     });
     const addBtn = document.createElement('button');
     addBtn.innerHTML = '⭐';
@@ -38,8 +38,8 @@ async function initModelSelector() {
     row2.style.display = 'flex'; row2.style.gap = '8px';
     const favSelect = document.createElement('select');
     Object.assign(favSelect.style, {
-        padding: '10px', borderRadius: '8px', border: '1px solid #10b981',
-        backgroundColor: '#0f172a', color: '#10b981', flex: '1', cursor: 'pointer'
+        padding: '12px', borderRadius: '8px', border: '1px solid #10b981',
+        backgroundColor: '#0f172a', color: '#10b981', flex: '1', cursor: 'pointer', outline: 'none'
     });
     const delBtn = document.createElement('button');
     delBtn.innerHTML = '🗑️';
@@ -50,30 +50,17 @@ async function initModelSelector() {
     container.append(searchInput, row1, row2);
     header.parentNode.insertBefore(container, header.nextSibling);
 
-    // --- LOGICA DATI ---
     let allModels = [];
     let favoriteIds = JSON.parse(localStorage.getItem('nemotron_favorites')) || [];
 
-    /**
-     * IL METODO CRUCIALE: Aggiorna il puntatore nel file script.js
-     * e sincronizza graficamente l'intera interfaccia.
-     */
+    // --- LOGICA DI SINCRONIZZAZIONE ---
     function syncActiveModel(modelId) {
         if (!modelId || !window.CONFIG) return;
-
-        // 1. Sovrascrive il modello nello script principale
         window.CONFIG.MODEL = modelId;
-        console.log("🎯 Modello Attivo Aggiornato:", window.CONFIG.MODEL);
-
-        // 2. Sincronizza i menu a tendina
+        
         if (mainSelect.value !== modelId) mainSelect.value = modelId;
-        if (favoriteIds.includes(modelId)) {
-            favSelect.value = modelId;
-        } else {
-            favSelect.selectedIndex = -1; // Deseleziona se non è tra i preferiti
-        }
+        favSelect.value = favoriteIds.includes(modelId) ? modelId : "";
 
-        // 3. Aggiorna il testo dell'header
         const status = document.querySelector('.status-indicator');
         if (status) {
             const shortName = modelId.split('/').pop();
@@ -81,7 +68,7 @@ async function initModelSelector() {
         }
     }
 
-    // Caricamento API
+    // --- CARICAMENTO E SMISTAMENTO ---
     try {
         const res = await fetch('https://openrouter.ai/api/v1/models');
         const data = await res.json();
@@ -89,31 +76,53 @@ async function initModelSelector() {
         
         renderMain();
         renderFavs();
-        
-        // Al boot, sincronizza col modello di default definito in config.js
         syncActiveModel(window.CONFIG.MODEL);
     } catch (e) { console.error("Errore caricamento modelli"); }
 
     function renderMain(filtered = allModels) {
         mainSelect.innerHTML = '';
-        const groups = {
-            '🟢 Gratis': filtered.filter(m => (m.pricing?.prompt === "0" || m.id.includes(':free'))),
-            '🟡 Premium': filtered.filter(m => !(m.pricing?.prompt === "0" || m.id.includes(':free')))
+        
+        // Categorie logiche (Il sottomenu ordinato)
+        const categories = {
+            freeReasoning: { label: '🟢 GRATIS - Modelli Pensanti (Reasoning)', models: [] },
+            freeStandard:  { label: '🟢 GRATIS - Modelli Standard', models: [] },
+            paidReasoning: { label: '🟡 PREMIUM - Modelli Pensanti (Reasoning)', models: [] },
+            paidStandard:  { label: '🟡 PREMIUM - Modelli Standard', models: [] }
         };
-        for (const [label, models] of Object.entries(groups)) {
-            if (models.length > 0) {
-                const g = document.createElement('optgroup'); g.label = label;
-                models.forEach(m => {
-                    const o = document.createElement('option'); o.value = m.id; o.textContent = m.name;
-                    g.appendChild(o);
+
+        filtered.forEach(m => {
+            // Check Prezzo
+            const isFree = (m.pricing?.prompt === "0" || m.id.includes(':free'));
+            
+            // Check Ragionamento
+            const idL = m.id.toLowerCase();
+            const nameL = m.name.toLowerCase();
+            const isReasoning = idL.includes('r1') || idL.includes('reasoning') || nameL.includes('think') || idL.includes('thinking');
+
+            if (isFree && isReasoning) categories.freeReasoning.models.push(m);
+            else if (isFree && !isReasoning) categories.freeStandard.models.push(m);
+            else if (!isFree && isReasoning) categories.paidReasoning.models.push(m);
+            else categories.paidStandard.models.push(m);
+        });
+
+        // Creazione visiva degli OptGroup
+        Object.values(categories).forEach(cat => {
+            if (cat.models.length > 0) {
+                const group = document.createElement('optgroup');
+                group.label = cat.label;
+                cat.models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.textContent = m.name;
+                    group.appendChild(opt);
                 });
-                mainSelect.appendChild(g);
+                mainSelect.appendChild(group);
             }
-        }
+        });
     }
 
     function renderFavs() {
-        favSelect.innerHTML = favoriteIds.length ? '' : '<option value="">Nessun preferito</option>';
+        favSelect.innerHTML = favoriteIds.length ? '' : '<option value="">⭐ Nessun preferito</option>';
         favoriteIds.forEach(id => {
             const m = allModels.find(x => x.id === id);
             const o = document.createElement('option'); o.value = id;
@@ -122,15 +131,10 @@ async function initModelSelector() {
         });
     }
 
-    // --- LISTENERS ---
-    
-    // Cambio da Catalogo
+    // --- EVENTI ---
     mainSelect.onchange = (e) => syncActiveModel(e.target.value);
-
-    // Cambio da Preferiti (Quello che chiedevi: ora passa il dato al main script)
     favSelect.onchange = (e) => syncActiveModel(e.target.value);
 
-    // Aggiungi
     addBtn.onclick = () => {
         const id = mainSelect.value;
         if (id && !favoriteIds.includes(id)) {
@@ -141,16 +145,15 @@ async function initModelSelector() {
         }
     };
 
-    // Rimuovi
     delBtn.onclick = () => {
         const id = favSelect.value;
+        if (!id) return;
         favoriteIds = favoriteIds.filter(x => x !== id);
         localStorage.setItem('nemotron_favorites', JSON.stringify(favoriteIds));
         renderFavs();
-        syncActiveModel(mainSelect.value); // Torna al modello del catalogo
+        syncActiveModel(mainSelect.value);
     };
 
-    // Ricerca
     searchInput.oninput = (e) => {
         const term = e.target.value.toLowerCase();
         renderMain(allModels.filter(m => m.name.toLowerCase().includes(term) || m.id.includes(term)));
