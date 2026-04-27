@@ -1,20 +1,47 @@
 /**
  * Modulo Chat Principale (Core Logic)
- * Richiede che config.js sia caricato prima di questo file.
+ * Richiede che config.js sia caricato.
  */
 
 let chatHistory = [];
 
-const messageArea = document.getElementById('messages');
-const userInput = document.getElementById('user-input');
-const sendBtn = document.getElementById('send-btn');
+// Dichiariamo le variabili vuote
+let messageArea, userInput, sendBtn;
+
+// L'equivalente del void Start() in Unity: aspetta che tutta la scena UI sia caricata
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("⚙️ script.js caricato: inizializzazione riferimenti UI...");
+    
+    // Assegnazione dei riferimenti
+    messageArea = document.getElementById('messages');
+    userInput = document.getElementById('user-input');
+    sendBtn = document.getElementById('send-btn');
+
+    if (!sendBtn || !userInput) {
+        console.error("❌ Errore critico: Elementi UI non trovati! Controlla i nomi degli ID nell'HTML.");
+        return;
+    }
+
+    // Event Listeners di input (Il nostro OnClick)
+    sendBtn.addEventListener('click', handleSendMessage);
+    userInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleSendMessage();
+    });
+
+    console.log("✅ Sistema pronto. In attesa di input utente...");
+    userInput.focus();
+});
 
 /**
  * Gestore principale dell'invio messaggi (Metodo Completo)
  */
 async function handleSendMessage() {
+    console.log("▶️ Richiesto invio messaggio.");
     const text = userInput.value.trim();
-    if (!text) return;
+    if (!text) {
+        console.log("⚠️ Testo vuoto, comando ignorato.");
+        return;
+    }
 
     appendMessage(text, 'user');
     userInput.value = '';
@@ -24,10 +51,12 @@ async function handleSendMessage() {
     toggleLoading(true);
 
     try {
-        // Null-Check: Verifica che il file di configurazione esista in memoria
         if (!window.CONFIG || !window.CONFIG.API_KEY) {
             throw new Error("File config.js non trovato o API Key mancante.");
         }
+
+        console.log("📡 Avvio chiamata API verso:", window.CONFIG.API_URL);
+        console.log("🧠 Modello target:", window.CONFIG.MODEL);
 
         const response = await fetch(window.CONFIG.API_URL, {
             method: 'POST',
@@ -40,22 +69,24 @@ async function handleSendMessage() {
             body: JSON.stringify({
                 model: window.CONFIG.MODEL, 
                 messages: chatHistory,
-                include_reasoning: true // Supporto per il reasoning-ui
+                include_reasoning: true 
             })
         });
 
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.error?.message || 'Errore API');
+            console.error("❌ Errore ritornato dal server OpenRouter:", errorData);
+            throw new Error(errorData.error?.message || `Errore Server HTTP ${response.status}`);
         }
 
         const data = await response.json();
+        console.log("✅ Dati ricevuti con successo:", data);
+        
         const messageObj = data.choices[0].message;
         
         let aiResponse = messageObj.content || '';
         let reasoningText = messageObj.reasoning || '';
 
-        // Estrazione del tag <think> se il modello lo inserisce nel testo puro
         const thinkRegex = /<think>([\s\S]*?)<\/think>/;
         const match = aiResponse.match(thinkRegex);
         if (match) {
@@ -67,7 +98,7 @@ async function handleSendMessage() {
         chatHistory.push({ role: 'assistant', content: aiResponse });
 
     } catch (error) {
-        console.error('Chat Error:', error);
+        console.error('❌ Eccezione catturata durante il ciclo:', error);
         appendMessage(`Errore di sistema: ${error.message}`, 'ai');
         chatHistory.pop(); 
     } finally {
@@ -76,13 +107,12 @@ async function handleSendMessage() {
 }
 
 /**
- * Gestore dell'interfaccia utente per l'aggiunta dei messaggi
+ * Gestore dell'interfaccia utente
  */
 function appendMessage(content, sender, reasoning = null) {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', sender);
     
-    // Integrazione del componente Reasoning se presente nella scena
     if (reasoning && window.ReasoningUI) {
         const reasoningBlock = window.ReasoningUI.createReasoningBlock(reasoning);
         msgDiv.appendChild(reasoningBlock);
@@ -101,11 +131,3 @@ function toggleLoading(isLoading) {
     sendBtn.disabled = isLoading;
     if (!isLoading) userInput.focus();
 }
-
-// Event Listeners di input
-sendBtn.addEventListener('click', handleSendMessage);
-userInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') handleSendMessage();
-});
-
-userInput.focus();
