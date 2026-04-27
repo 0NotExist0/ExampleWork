@@ -1,13 +1,11 @@
 /**
  * Script indipendente per il caricamento, la ricerca e la selezione
- * dinamica dei modelli tramite l'API di OpenRouter.
+ * dinamica dei modelli. Sovrascrive la variabile del main script.
  */
 
 async function initModelSelector() {
-    // 1. Costruzione dell'Interfaccia Utente (UI)
     const header = document.querySelector('header');
     
-    // Contenitore per i controlli
     const selectorContainer = document.createElement('div');
     Object.assign(selectorContainer.style, {
         display: 'flex',
@@ -18,7 +16,6 @@ async function initModelSelector() {
         borderBottom: '1px solid #334155'
     });
 
-    // Campo di ricerca testuale
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
     searchInput.placeholder = 'Cerca modello (es. nemotron, llama, gpt...)';
@@ -32,7 +29,6 @@ async function initModelSelector() {
         outline: 'none'
     });
 
-    // Menu a tendina (Dropdown)
     const selectDropdown = document.createElement('select');
     Object.assign(selectDropdown.style, {
         padding: '10px',
@@ -45,24 +41,19 @@ async function initModelSelector() {
         outline: 'none'
     });
 
-    // Aggiunge gli elementi al DOM sotto l'header principale
     selectorContainer.appendChild(searchInput);
     selectorContainer.appendChild(selectDropdown);
     header.parentNode.insertBefore(selectorContainer, header.nextSibling);
 
-    // 2. Recupero dei Modelli dall'API
     let allModels = [];
     try {
         selectDropdown.innerHTML = '<option>Scaricamento modelli in corso...</option>';
         
-        // OpenRouter fornisce un endpoint pubblico per la lista dei modelli
         const response = await fetch('https://openrouter.ai/api/v1/models');
         if (!response.ok) throw new Error('Errore di rete');
         
         const data = await response.json();
-        allModels = data.data; // OpenRouter inserisce l'array nell'oggetto "data"
-        
-        // Ordina i modelli in ordine alfabetico per ID
+        allModels = data.data;
         allModels.sort((a, b) => a.id.localeCompare(b.id));
         
         renderOptions(allModels);
@@ -71,9 +62,8 @@ async function initModelSelector() {
         selectDropdown.innerHTML = '<option>Errore nel caricamento dei modelli</option>';
     }
 
-    // 3. Funzione di Rendering delle Opzioni
     function renderOptions(filteredModels) {
-        selectDropdown.innerHTML = ''; // Svuota la tendina
+        selectDropdown.innerHTML = ''; 
         
         if (filteredModels.length === 0) {
             selectDropdown.innerHTML = '<option value="">Nessun modello trovato</option>';
@@ -83,10 +73,9 @@ async function initModelSelector() {
         filteredModels.forEach(model => {
             const option = document.createElement('option');
             option.value = model.id;
-            // Mostra sia il nome amichevole che l'ID tecnico
             option.textContent = `${model.name} (${model.id})`;
             
-            // Seleziona automaticamente il modello definito nel CONFIG principale
+            // Verifica la variabile globale per selezionare quello attuale di default
             if (window.CONFIG && model.id === window.CONFIG.MODEL) {
                 option.selected = true;
             }
@@ -94,9 +83,6 @@ async function initModelSelector() {
         });
     }
 
-    // 4. Event Listeners per Ricerca e Selezione
-    
-    // Filtro in tempo reale mentre scrivi
     searchInput.addEventListener('input', (e) => {
         const searchTerm = e.target.value.toLowerCase();
         const filtered = allModels.filter(m => 
@@ -106,17 +92,19 @@ async function initModelSelector() {
         renderOptions(filtered);
     });
 
-    // Aggiornamento della variabile CONFIG globale quando cambi modello
+    // EVENTO CHIAVE: Quando l'utente seleziona un modello diverso dalla tendina
     selectDropdown.addEventListener('change', (e) => {
         const selectedModelId = e.target.value;
         if (selectedModelId && window.CONFIG) {
-            // Modifica la proprietà MODEL nell'oggetto CONFIG del file script.js
-            window.CONFIG.MODEL = selectedModelId;
             
-            // Aggiorna visivamente l'indicatore di stato nell'header (opzionale)
+            // SOSTITUZIONE: Qui il secondo script entra nel primo e cambia il modello
+            window.CONFIG.MODEL = selectedModelId; 
+            
+            // Log di conferma visualizzabile nella console di Eruda
+            console.log("SUCCESSO: Modello sostituito nel main script. Nuovo target API ->", window.CONFIG.MODEL);
+            
             const statusIndicator = document.querySelector('.status-indicator');
             if (statusIndicator) {
-                // Tronca il nome se è troppo lungo per l'interfaccia mobile
                 const shortName = selectedModelId.split('/').pop();
                 statusIndicator.innerHTML = `Online - <span style="color:#f8fafc; margin-left:4px">${shortName}</span>`;
             }
@@ -124,5 +112,4 @@ async function initModelSelector() {
     });
 }
 
-// Avvia lo script una volta caricato
 initModelSelector();
