@@ -1,5 +1,5 @@
 /**
- * Modulo Chat Principale (Core Logic con Failsafe, Garbage Collection e Cursore Live)
+ * Modulo Chat Principale (Core Logic: Stream Blindato e Debugger di Rete)
  */
 
 let chatHistory = [];
@@ -8,7 +8,7 @@ const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 
-console.log("⚙️ script.js avviato con Failsafe e Garbage Collection attiva.");
+console.log("⚙️ script.js avviato con Stream Parser blindato.");
 
 if (!sendBtn || !userInput) {
     console.error("❌ Errore: Elementi UI non trovati!");
@@ -33,10 +33,14 @@ async function handleSendMessage() {
     
     toggleLoading(true);
 
+    let msgDiv = null;
+
     try {
         if (!window.CONFIG || !window.CONFIG.API_KEY) {
             throw new Error("Dati di configurazione mancanti.");
         }
+
+        console.log(`📡 Contattando OpenRouter per il modello: ${window.CONFIG.MODEL}...`);
 
         const response = await fetch(window.CONFIG.API_URL, {
             method: 'POST',
@@ -49,8 +53,7 @@ async function handleSendMessage() {
             body: JSON.stringify({
                 model: window.CONFIG.MODEL, 
                 messages: chatHistory,
-                include_reasoning: true,
-                stream: true 
+                stream: true // Rimosso include_reasoning che fa crashare alcuni modelli free
             })
         });
 
@@ -60,14 +63,14 @@ async function handleSendMessage() {
         }
 
         // ISTANZIAZIONE DEL PREFAB UI
-        const msgDiv = document.createElement('div');
+        msgDiv = document.createElement('div');
         msgDiv.classList.add('message', 'ai');
         
         const liveReasoning = window.ReasoningUI ? window.ReasoningUI.createLiveReasoningBlock() : null;
         if (liveReasoning) msgDiv.appendChild(liveReasoning.container);
         
         const textNode = document.createElement('div');
-        textNode.textContent = "▮"; // Cursore di caricamento iniziale
+        textNode.textContent = "▮"; // Cursore di attesa
         msgDiv.appendChild(textNode);
         
         messageArea.appendChild(msgDiv);
@@ -80,6 +83,7 @@ async function handleSendMessage() {
         
         let nativeReasoningBuffer = "";
         let rawContentBuffer = "";
+        let receivedValidData = false; // Flag per controllare se il server ci sta ignorando
 
         while (true) {
             const { done, value } = await reader.read();
@@ -87,10 +91,20 @@ async function handleSendMessage() {
             
             buffer += decoder.decode(value, { stream: true });
             let lines = buffer.split('\n');
-            buffer = lines.pop(); 
+            buffer = lines.pop(); // Salva l'ultimo pezzo incompleto
 
             for (let line of lines) {
                 line = line.trim();
+                
+                // Ignora righe vuote e commenti di keep-alive del server
+                if (!line || line.startsWith(':')) continue; 
+
+                // Se OpenRouter manda un errore testuale grezzo nello stream
+                if (line.includes('"error"')) {
+                    console.error("❌ Il server ha inviato un errore nello stream:", line);
+                    throw new Error("Errore interno del server durante la generazione.");
+                }
+
                 if (line.startsWith('data: ')) {
                     const dataStr = line.substring(6);
                     if (dataStr === '[DONE]') continue;
@@ -98,7 +112,9 @@ async function handleSendMessage() {
                     try {
                         const dataObj = JSON.parse(dataStr);
                         const delta = dataObj.choices[0]?.delta;
+                        
                         if (!delta) continue;
+                        receivedValidData = true; // Abbiamo ricevuto almeno un byte utile!
 
                         if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
                         if (delta.content) rawContentBuffer += delta.content;
@@ -111,22 +127,19 @@ async function handleSendMessage() {
                         if (thinkStart !== -1) {
                             let thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
                             if (thinkEnd !== -1) {
-                                // Tag chiuso: prendiamo il testo prima e dopo il tag
                                 displayContent = rawContentBuffer.substring(0, thinkStart) + rawContentBuffer.substring(thinkEnd + 8);
                                 displayReasoning = rawContentBuffer.substring(thinkStart + 7, thinkEnd);
                             } else {
-                                // Tag aperto: tutto ciò che c'è dopo <think> è ragionamento in corso
                                 displayContent = rawContentBuffer.substring(0, thinkStart);
                                 displayReasoning = rawContentBuffer.substring(thinkStart + 7);
                             }
                         } else {
-                            // Nessun tag presente
                             displayContent = rawContentBuffer;
                         }
 
                         let finalReasoning = (nativeReasoningBuffer + "\n" + displayReasoning).trim();
                         
-                        // Aggiorna la UI in tempo reale, aggiungendo il cursore lampeggiante alla fine del testo
+                        // Aggiorna UI
                         if (finalReasoning && liveReasoning) {
                             liveReasoning.updateText(finalReasoning);
                         }
@@ -135,15 +148,14 @@ async function handleSendMessage() {
                         messageArea.scrollTop = messageArea.scrollHeight;
                         
                     } catch (e) {
-                        // Salta frame corrotti
+                        // Stampiamo il pacchetto corrotto per indagini, ma non blocchiamo l'app
+                        console.warn("⚠️ Pacchetto JSON ignorato perché corrotto:", dataStr);
                     }
                 }
             }
         }
 
         // --- FINE STREAM E GARBAGE COLLECTION ---
-        
-        // 1. Rimuove il cursore lampeggiante
         let finalContent = textNode.textContent.replace(" ▮", "").replace("▮", "").trim();
         textNode.textContent = finalContent;
 
@@ -152,19 +164,27 @@ async function handleSendMessage() {
             liveReasoning.finish(hasReasoning);
         }
 
-        // 2. Failsafe: Se il div è vuoto (il modello non ha detto nulla), distruggiamo il GameObject
-        if (finalContent === "" && nativeReasoningBuffer === "" && !rawContentBuffer.includes('<think>')) {
-            console.warn("⚠️ Ricevuta risposta vuota dal server. Eseguo il Destroy del nodo UI.");
-            messageArea.removeChild(msgDiv); // Destroy(gameObject)
-            appendUserMessage("⚠️ Il modello non ha fornito alcuna risposta. Potrebbe essere sovraccarico.", 'ai');
-            chatHistory.pop(); // Rimuoviamo la nostra domanda dalla history per non corrompere il contesto
+        // Failsafe: Distruggi il GameObject se non è arrivato nulla
+        if (!receivedValidData || (finalContent === "" && nativeReasoningBuffer === "" && !rawContentBuffer.includes('<think>'))) {
+            console.warn("🗑️ Ricevuta risposta vuota dal server. Distruggo il Prefab UI.");
+            if (msgDiv && msgDiv.parentNode) {
+                messageArea.removeChild(msgDiv); 
+            }
+            appendUserMessage("⚠️ Il server (OpenRouter) è sovraccarico o il modello gratuito è offline in questo momento. Riprova tra poco.", 'ai');
+            chatHistory.pop(); 
         } else {
             chatHistory.push({ role: 'assistant', content: finalContent });
         }
 
     } catch (error) {
-        console.error('❌ Errore API:', error);
-        appendUserMessage(`Errore di connessione: ${error.message}`, 'ai');
+        console.error('❌ Eccezione fatale nel loop di rete:', error);
+        
+        // Se c'è stato un crash, puliamo il fumetto "bloccato"
+        if (msgDiv && msgDiv.parentNode && msgDiv.textContent === "▮") {
+            messageArea.removeChild(msgDiv);
+        }
+        
+        appendUserMessage(`Errore di sistema: ${error.message}`, 'ai');
         chatHistory.pop(); 
     } finally {
         toggleLoading(false);
