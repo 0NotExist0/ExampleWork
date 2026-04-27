@@ -1,109 +1,143 @@
 /**
- * Script Selezione Modelli a Sottomenu Nidificati.
- * Struttura: Prezzo -> Tipo (Standard/Reasoning) -> Modelli
+ * Componente Selezione Modelli a Gerarchia Dinamica
+ * Livelli: Prezzo -> Tipo -> Nome Modello
  */
 
 async function initModelSelector() {
     const header = document.querySelector('header');
-    const container = document.createElement('div');
-    container.className = 'nested-menu-container';
+    if (!header) return;
 
-    // Tasto principale per aprire il menu
+    // 1. Inizializzazione Container Radice
+    const rootContainer = document.createElement('div');
+    rootContainer.id = 'model-menu-root';
+    
     const mainTrigger = document.createElement('div');
     mainTrigger.className = 'menu-item';
-    mainTrigger.innerHTML = `<span>Seleziona Modello</span> <span id="current-model-display">...</span>`;
-    container.appendChild(mainTrigger);
+    mainTrigger.innerHTML = `
+        <span>📂 <b>Catalogo Modelli</b></span>
+        <span id="active-model-name" style="color:#60a5fa; font-size:12px; font-weight:bold;">Sincronizzazione...</span>
+        <span class="arrow">▶</span>
+    `;
+    
+    const mainSubmenu = document.createElement('div');
+    mainSubmenu.className = 'submenu';
+    
+    rootContainer.appendChild(mainTrigger);
+    rootContainer.appendChild(mainSubmenu);
+    header.parentNode.insertBefore(rootContainer, header.nextSibling);
 
-    const rootMenu = document.createElement('div');
-    rootMenu.className = 'submenu';
-    container.appendChild(rootMenu);
-
+    // Gestore apertura/chiusura menu radice
     mainTrigger.onclick = () => mainTrigger.classList.toggle('open');
 
-    let allModels = [];
-
+    // 2. Recupero Dati e Costruzione Albero
     try {
-        const res = await fetch('https://openrouter.ai/api/v1/models');
-        const data = await res.json();
-        allModels = data.data.sort((a, b) => a.id.localeCompare(b.id));
-        renderNestedMenu(allModels, rootMenu);
-        updateDisplay(window.CONFIG.MODEL);
-    } catch (e) { console.error("Errore caricamento", e); }
+        const response = await fetch('https://openrouter.ai/api/v1/models');
+        if (!response.ok) throw new Error("Network error");
+        
+        const data = await response.json();
+        const allModels = data.data.sort((a, b) => a.id.localeCompare(b.id));
+        
+        buildHierarchy(allModels, mainSubmenu, mainTrigger);
+        
+        // Impostazione iniziale basata su config.js
+        if (window.CONFIG) {
+            updateGlobalUI(window.CONFIG.MODEL);
+        }
+    } catch (error) {
+        console.error("Errore inizializzazione menu:", error);
+        mainTrigger.innerHTML = "<span>❌ Errore nel caricamento dei modelli</span>";
+    }
 
-    function renderNestedMenu(models, parent) {
-        const categories = {
-            "Gratis": { "Standard": [], "Reasoning": [] },
-            "Premium": { "Standard": [], "Reasoning": [] }
+    /**
+     * Organizza i modelli in una struttura nidificata
+     */
+    function buildHierarchy(models, container, rootBtn) {
+        const tree = {
+            "🟢 Modelli Gratuiti": { "Standard": [], "Pensanti (Reasoning)": [] },
+            "🟡 Modelli Premium": { "Standard": [], "Pensanti (Reasoning)": [] }
         };
 
-        // Smistamento modelli
+        // Algoritmo di smistamento (Sorting Logic)
         models.forEach(m => {
             const isFree = (m.pricing?.prompt === "0" || m.id.includes(':free'));
-            const isReasoning = m.id.toLowerCase().includes('r1') || m.id.toLowerCase().includes('reasoning') || m.name.toLowerCase().includes('think');
+            const isReasoning = m.id.toLowerCase().includes('r1') || 
+                               m.id.toLowerCase().includes('reasoning') || 
+                               m.name.toLowerCase().includes('think');
             
-            const priceKey = isFree ? "Gratis" : "Premium";
-            const typeKey = isReasoning ? "Reasoning" : "Standard";
-            categories[priceKey][typeKey].push(m);
+            const branch = isFree ? "🟢 Modelli Gratuiti" : "🟡 Modelli Premium";
+            const leaf = isReasoning ? "Pensanti (Reasoning)" : "Standard";
+            tree[branch][leaf].push(m);
         });
 
-        // Creazione dei sottomenu (Livello 1: Prezzo)
-        for (let price in categories) {
-            const priceItem = createMenuItem(price, parent, price === "Gratis" ? "badge-free" : "badge-paid");
-            const priceSub = document.createElement('div');
-            priceSub.className = 'submenu';
-            parent.appendChild(priceSub);
+        // Generazione fisica degli elementi DOM
+        for (let folderName in tree) {
+            const folderBtn = createFolderNode(folderName, container);
+            const folderContent = document.createElement('div');
+            folderContent.className = 'submenu';
+            container.appendChild(folderContent);
 
-            priceItem.onclick = () => priceItem.classList.toggle('open');
+            for (let subFolderName in tree[folderName]) {
+                const modelList = tree[folderName][subFolderName];
+                if (modelList.length === 0) continue;
 
-            // Creazione (Livello 2: Tipo)
-            for (let type in categories[price]) {
-                if (categories[price][type].length === 0) continue;
+                const subFolderBtn = createFolderNode(subFolderName, folderContent);
+                const subFolderContent = document.createElement('div');
+                subFolderContent.className = 'submenu';
+                folderContent.appendChild(subFolderContent);
 
-                const typeItem = createMenuItem(type, priceSub);
-                const typeSub = document.createElement('div');
-                typeSub.className = 'submenu';
-                priceSub.appendChild(typeSub);
-
-                typeItem.onclick = () => typeItem.classList.toggle('open');
-
-                // Creazione (Livello 3: Modelli effettivi)
-                categories[price][type].forEach(model => {
-                    const modItem = document.createElement('div');
-                    modItem.className = 'menu-item model-option';
-                    modItem.innerHTML = `<span>${model.name}</span>`;
-                    modItem.onclick = () => {
-                        selectModel(model.id);
-                        // Chiudi tutto il menu dopo la selezione
-                        mainTrigger.classList.remove('open');
+                modelList.forEach(model => {
+                    const modelItem = document.createElement('div');
+                    modelItem.className = 'model-leaf';
+                    modelItem.innerText = model.name;
+                    
+                    modelItem.onclick = (event) => {
+                        event.stopPropagation(); // Impedisce la chiusura dei folder superiori
+                        
+                        // Aggiorna variabile globale e chiude il menu principale
+                        if (window.CONFIG) {
+                            window.CONFIG.MODEL = model.id;
+                            updateGlobalUI(model.id);
+                        }
+                        rootBtn.classList.remove('open');
                     };
-                    typeSub.appendChild(modItem);
+                    subFolderContent.appendChild(modelItem);
                 });
             }
         }
     }
 
-    function createMenuItem(label, parent, badgeClass = "") {
+    /**
+     * Helper per creare una cartella cliccabile
+     */
+    function createFolderNode(label, parent) {
         const div = document.createElement('div');
         div.className = 'menu-item';
-        div.innerHTML = `<span class="${badgeClass}">${label}</span> <span>▶</span>`;
+        div.innerHTML = `<span>${label}</span> <span class="arrow">▶</span>`;
+        
+        div.onclick = (event) => {
+            event.stopPropagation();
+            div.classList.toggle('open');
+        };
+        
         parent.appendChild(div);
         return div;
     }
 
-    function selectModel(id) {
-        if (!window.CONFIG) return;
-        window.CONFIG.MODEL = id;
-        updateDisplay(id);
-        console.log("Modello attivo:", id);
-    }
+    /**
+     * Sincronizza l'interfaccia con il modello selezionato
+     */
+    function updateGlobalUI(modelId) {
+        const activeNameTag = document.getElementById('active-model-name');
+        const statusIndicator = document.querySelector('.status-indicator');
+        const shortName = modelId.split('/').pop();
 
-    function updateDisplay(id) {
-        const display = document.getElementById('current-model-display');
-        const status = document.querySelector('.status-indicator');
-        const name = id.split('/').pop();
-        if (display) display.innerText = name;
-        if (status) status.innerHTML = `Online - <span style="color:#60a5fa">${name}</span>`;
+        if (activeNameTag) activeNameTag.innerText = shortName;
+        if (statusIndicator) {
+            statusIndicator.innerHTML = `Online - <span style="color:#60a5fa">${shortName}</span>`;
+        }
+        console.log("🚀 Motore sincronizzato su modello:", modelId);
     }
 }
 
+// Esecuzione immediata
 initModelSelector();
