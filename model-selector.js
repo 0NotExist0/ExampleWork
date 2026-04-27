@@ -1,5 +1,5 @@
 /**
- * Script Selezione Modelli Finale: Gerarchia Mobile-First + Sistema Preferiti Persistente.
+ * Script Selezione Modelli Finale: Gerarchia Mobile-First + Sistema Preferiti Persistente + Ricerca.
  * Guard anti-duplicato: evita doppia inizializzazione se lo script viene caricato due volte.
  */
 
@@ -32,7 +32,14 @@ if (!window.__modelSelectorLoaded) {
         rootContainer.appendChild(mainSubmenu);
         header.parentNode.insertBefore(rootContainer, header.nextSibling);
 
-        mainTrigger.onclick = () => mainTrigger.classList.toggle('open');
+        mainTrigger.onclick = () => {
+            mainTrigger.classList.toggle('open');
+            // Auto-focus sulla barra di ricerca quando si apre il menu
+            if (mainTrigger.classList.contains('open')) {
+                const searchInput = document.getElementById('model-search-input');
+                if (searchInput) searchInput.focus();
+            }
+        };
 
         // --- DATI & PREFERITI ---
         let allModels = [];
@@ -50,16 +57,70 @@ if (!window.__modelSelectorLoaded) {
         function renderAll() {
             mainSubmenu.innerHTML = '';
             
-            // 1. CARTELLA PREFERITI (Sempre in alto)
-            const favFolderBtn = createFolderNode("⭐ I Miei Preferiti", mainSubmenu);
+            // --- 0. BARRA DI RICERCA ---
+            const searchContainer = document.createElement('div');
+            // Stile inline di base per posizionamento sticky e visibilità
+            searchContainer.style.cssText = 'padding: 8px; border-bottom: 1px solid #374151; position: sticky; top: 0; background: inherit; z-index: 10;';
+            searchContainer.innerHTML = `
+                <input type="text" id="model-search-input" placeholder="🔍 Cerca modello..." 
+                style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; outline: none; box-sizing: border-box;">
+            `;
+            mainSubmenu.appendChild(searchContainer);
+
+            const searchInput = searchContainer.querySelector('#model-search-input');
+
+            // Contenitore per i risultati di ricerca (inizialmente nascosto)
+            const searchResultsContainer = document.createElement('div');
+            searchResultsContainer.style.display = 'none';
+            mainSubmenu.appendChild(searchResultsContainer);
+
+            // Contenitore per la normale gerarchia a cartelle
+            const treeContainer = document.createElement('div');
+            mainSubmenu.appendChild(treeContainer);
+
+            // LOGICA DI FILTRAGGIO
+            searchInput.addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase().trim();
+                
+                if (query === '') {
+                    // Ripristina la vista a cartelle
+                    searchResultsContainer.style.display = 'none';
+                    treeContainer.style.display = 'block';
+                    searchResultsContainer.innerHTML = '';
+                } else {
+                    // Mostra i risultati "flat" nascondendo le cartelle
+                    treeContainer.style.display = 'none';
+                    searchResultsContainer.style.display = 'block';
+                    searchResultsContainer.innerHTML = '';
+
+                    const filtered = allModels.filter(m => 
+                        m.name.toLowerCase().includes(query) || m.id.toLowerCase().includes(query)
+                    );
+
+                    if (filtered.length === 0) {
+                        searchResultsContainer.innerHTML = '<div class="model-leaf" style="font-style:italic; opacity:0.5; padding: 8px 12px;">Nessun risultato trovato...</div>';
+                    } else {
+                        filtered.forEach(model => {
+                            createModelLeaf(model, searchResultsContainer, () => {
+                                renderFavoriteLeaves(favSubmenu);
+                                // Aggiorna graficamente la stellina anche nei risultati di ricerca
+                                if (searchInput.value.trim() !== '') searchInput.dispatchEvent(new Event('input'));
+                            });
+                        });
+                    }
+                }
+            });
+
+            // --- 1. CARTELLA PREFERITI (Sempre in alto) ---
+            const favFolderBtn = createFolderNode("⭐ I Miei Preferiti", treeContainer);
             favFolderBtn.classList.add('folder-fav');
             const favSubmenu = document.createElement('div');
             favSubmenu.className = 'submenu';
-            mainSubmenu.appendChild(favSubmenu);
+            treeContainer.appendChild(favSubmenu);
 
             renderFavoriteLeaves(favSubmenu);
 
-            // 2. GERARCHIA CATALOGO COMPLETO
+            // --- 2. GERARCHIA CATALOGO COMPLETO ---
             const tree = {
                 "🟢 GRATIS": { "Standard": [], "Reasoning": [] },
                 "🟡 PREMIUM": { "Standard": [], "Reasoning": [] }
@@ -76,10 +137,10 @@ if (!window.__modelSelectorLoaded) {
             });
 
             for (let branch in tree) {
-                const branchBtn = createFolderNode(branch, mainSubmenu);
+                const branchBtn = createFolderNode(branch, treeContainer);
                 const branchSub = document.createElement('div');
                 branchSub.className = 'submenu';
-                mainSubmenu.appendChild(branchSub);
+                treeContainer.appendChild(branchSub);
 
                 for (let leaf in tree[branch]) {
                     if (tree[branch][leaf].length === 0) continue;
@@ -113,7 +174,7 @@ if (!window.__modelSelectorLoaded) {
             const isFav = favoriteIds.includes(model.id);
 
             leaf.innerHTML = `
-                <span class="model-name">${model.name}</span>
+                <span class="model-name" title="${model.id}">${model.name}</span>
                 <button class="fav-toggle ${isFav ? 'active' : ''}" title="Aggiungi ai preferiti">★</button>
             `;
 
@@ -130,7 +191,14 @@ if (!window.__modelSelectorLoaded) {
                 e.stopPropagation();
                 toggleFavorite(model.id);
                 onFavChange();
-                renderAll();
+                
+                // Aggiorna lo stato visivo della singola foglia immediatamente
+                const btn = e.currentTarget;
+                if (favoriteIds.includes(model.id)) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
             };
 
             parent.appendChild(leaf);
@@ -139,7 +207,7 @@ if (!window.__modelSelectorLoaded) {
         function renderFavoriteLeaves(container) {
             container.innerHTML = '';
             if (favoriteIds.length === 0) {
-                container.innerHTML = '<div class="model-leaf" style="font-style:italic; opacity:0.5;">Nessun preferito...</div>';
+                container.innerHTML = '<div class="model-leaf" style="font-style:italic; opacity:0.5; padding: 8px 12px;">Nessun preferito...</div>';
                 return;
             }
 
