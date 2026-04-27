@@ -1,11 +1,13 @@
 /**
  * Script indipendente per il caricamento, la ricerca e la selezione
- * dinamica dei modelli. Sovrascrive la variabile del main script.
+ * dinamica dei modelli tramite l'API di OpenRouter.
+ * ORA CON CATEGORIZZAZIONE AUTOMATICA (Gratis/Premium e Standard/Pensanti).
  */
 
 async function initModelSelector() {
     const header = document.querySelector('header');
     
+    // Contenitore UI
     const selectorContainer = document.createElement('div');
     Object.assign(selectorContainer.style, {
         display: 'flex',
@@ -18,7 +20,7 @@ async function initModelSelector() {
 
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
-    searchInput.placeholder = 'Cerca modello (es. nemotron, llama, gpt...)';
+    searchInput.placeholder = 'Cerca modello (es. nemotron, llama, deepseek...)';
     Object.assign(searchInput.style, {
         padding: '10px',
         borderRadius: '8px',
@@ -46,6 +48,8 @@ async function initModelSelector() {
     header.parentNode.insertBefore(selectorContainer, header.nextSibling);
 
     let allModels = [];
+
+    // --- SCARICAMENTO DATI ---
     try {
         selectDropdown.innerHTML = '<option>Scaricamento modelli in corso...</option>';
         
@@ -54,6 +58,8 @@ async function initModelSelector() {
         
         const data = await response.json();
         allModels = data.data;
+        
+        // Ordine alfabetico di base
         allModels.sort((a, b) => a.id.localeCompare(b.id));
         
         renderOptions(allModels);
@@ -62,6 +68,7 @@ async function initModelSelector() {
         selectDropdown.innerHTML = '<option>Errore nel caricamento dei modelli</option>';
     }
 
+    // --- FUNZIONE DI RENDERING E CATEGORIZZAZIONE ---
     function renderOptions(filteredModels) {
         selectDropdown.innerHTML = ''; 
         
@@ -69,22 +76,81 @@ async function initModelSelector() {
             selectDropdown.innerHTML = '<option value="">Nessun modello trovato</option>';
             return;
         }
-        
+
+        // 1. Definiamo i nostri "Tab dell'Inventario"
+        const categories = {
+            freeReasoning: { label: '🟢 GRATIS - Modelli Pensanti (Reasoning)', models: [] },
+            freeStandard:  { label: '🟢 GRATIS - Modelli Standard', models: [] },
+            paidReasoning: { label: '🟡 PREMIUM - Modelli Pensanti (Reasoning)', models: [] },
+            paidStandard:  { label: '🟡 PREMIUM - Modelli Standard', models: [] }
+        };
+
+        // 2. Cicliamo i modelli e li smistiamo (Logica di Sorting)
         filteredModels.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.id;
-            option.textContent = `${model.name} (${model.id})`;
             
-            // Verifica la variabile globale per selezionare quello attuale di default
-            if (window.CONFIG && model.id === window.CONFIG.MODEL) {
-                option.selected = true;
+            // A) Capire se è gratis
+            let isFree = false;
+            // OpenRouter invia i prezzi come stringhe (es: "0.0")
+            if (model.pricing) {
+                const promptPrice = parseFloat(model.pricing.prompt || "0");
+                const completionPrice = parseFloat(model.pricing.completion || "0");
+                if (promptPrice === 0 && completionPrice === 0) {
+                    isFree = true;
+                }
+            } 
+            // Fallback se l'ID finisce con :free
+            if (model.id.endsWith(':free')) isFree = true;
+
+            // B) Capire se è un modello che ragiona (Pensante)
+            const idLower = model.id.toLowerCase();
+            const nameLower = model.name.toLowerCase();
+            const isReasoning = 
+                idLower.includes('deepseek-r1') || 
+                idLower.includes('reasoning') || 
+                nameLower.includes('reasoning') || 
+                nameLower.includes('think') ||
+                idLower.includes('thinking');
+
+            // C) Smistamento nell'oggetto giusto
+            if (isFree && isReasoning) {
+                categories.freeReasoning.models.push(model);
+            } else if (isFree && !isReasoning) {
+                categories.freeStandard.models.push(model);
+            } else if (!isFree && isReasoning) {
+                categories.paidReasoning.models.push(model);
+            } else {
+                categories.paidStandard.models.push(model);
             }
-            selectDropdown.appendChild(option);
+        });
+
+        // 3. Creiamo l'interfaccia basandoci sulle categorie piene
+        Object.values(categories).forEach(category => {
+            if (category.models.length > 0) {
+                // Genera l'OptGroup (L'intestazione non selezionabile della categoria)
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = category.label;
+
+                // Genera le Option (I modelli effettivi dentro quella categoria)
+                category.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id;
+                    option.textContent = `${model.name} (${model.id})`;
+                    
+                    if (window.CONFIG && model.id === window.CONFIG.MODEL) {
+                        option.selected = true;
+                    }
+                    optgroup.appendChild(option);
+                });
+
+                selectDropdown.appendChild(optgroup);
+            }
         });
     }
 
+    // --- EVENT LISTENERS ---
     searchInput.addEventListener('input', (e) => {
         const searchTerm = e.target.value.toLowerCase();
+        // Filtra tutti i modelli. La funzione renderOptions ricreerà le categorie dinamicamente!
         const filtered = allModels.filter(m => 
             m.name.toLowerCase().includes(searchTerm) || 
             m.id.toLowerCase().includes(searchTerm)
@@ -92,16 +158,11 @@ async function initModelSelector() {
         renderOptions(filtered);
     });
 
-    // EVENTO CHIAVE: Quando l'utente seleziona un modello diverso dalla tendina
     selectDropdown.addEventListener('change', (e) => {
         const selectedModelId = e.target.value;
         if (selectedModelId && window.CONFIG) {
-            
-            // SOSTITUZIONE: Qui il secondo script entra nel primo e cambia il modello
             window.CONFIG.MODEL = selectedModelId; 
-            
-            // Log di conferma visualizzabile nella console di Eruda
-            console.log("SUCCESSO: Modello sostituito nel main script. Nuovo target API ->", window.CONFIG.MODEL);
+            console.log("Modello cambiato in:", window.CONFIG.MODEL);
             
             const statusIndicator = document.querySelector('.status-indicator');
             if (statusIndicator) {
