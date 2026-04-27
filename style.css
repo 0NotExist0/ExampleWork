@@ -1,4 +1,4 @@
-/* Variabili Globali */
+/* Variabili con palette ottimizzata */
 :root {
     --bg-color: #0f172a;
     --container-bg: #1e293b;
@@ -7,136 +7,141 @@
     --accent-green: #10b981;
     --accent-orange: #f59e0b;
     --border-color: #334155;
+    --header-height: 60px;
 }
 
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent; /* Rimuove il flash blu al tocco su mobile */
 }
 
 body {
-    font-family: 'Inter', sans-serif;
+    font-family: 'Inter', -apple-system, sans-serif;
     background-color: var(--bg-color);
     color: var(--text-primary);
-    height: 100vh;
+    /* Usa dvh per evitare il bug della barra degli indirizzi su mobile */
+    height: 100dvh; 
+    width: 100vw;
+    overflow: hidden; /* Impedisce il rimbalzo della pagina */
     display: flex;
     justify-content: center;
-    align-items: center;
 }
 
-/* Container Principale */
 #chat-container {
     width: 100%;
     max-width: 900px;
-    height: 95vh;
+    height: 100dvh; /* Occupa tutto lo schermo su mobile */
     background-color: var(--container-bg);
-    border-radius: 16px;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    position: relative;
 }
 
+/* Header compatto per mobile */
 header {
-    padding: 20px;
-    background: rgba(15, 23, 42, 0.6);
+    height: var(--header-height);
+    padding: 0 15px;
+    background: rgba(15, 23, 42, 0.9);
     border-bottom: 1px solid var(--border-color);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    z-index: 10;
 }
 
-/* --- STILE MENU NIDIFICATO --- */
+header h1 { font-size: 16px; }
+.status-indicator { font-size: 12px; }
+
+/* --- MENU NIDIFICATO SCROLLABILE --- */
 #model-menu-root {
     background: #162031;
     border-bottom: 2px solid var(--accent-blue);
-    user-select: none;
+    max-height: 50dvh; /* Non copre mai più di metà schermo */
+    overflow-y: auto;
+    z-index: 9;
 }
 
 .menu-item {
-    padding: 14px 20px;
+    padding: 16px; /* Tap target più grande per dita */
     background: #0f172a;
     border-bottom: 1px solid #1e293b;
     cursor: pointer;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    transition: background 0.2s ease;
 }
 
-.menu-item:hover {
-    background: #1e293b;
-}
+.arrow { transition: transform 0.3s; font-size: 10px; }
+.menu-item.open .arrow { transform: rotate(90deg); color: var(--accent-blue); }
 
-.arrow {
-    transition: transform 0.3s ease;
-    color: #64748b;
-    font-size: 12px;
-}
-
-/* Quando la cartella è aperta, ruota la freccia */
-.menu-item.open .arrow {
-    transform: rotate(90deg);
-    color: var(--accent-blue);
-}
-
-/* Sottomenu nidificato */
 .submenu {
-    display: none; /* Nascosto di default */
+    display: none;
     background: #1e293b;
-    border-left: 3px solid var(--accent-blue);
-    margin-left: 15px;
+    border-left: 4px solid var(--accent-blue);
 }
 
-/* Se l'item precedente ha classe 'open', mostra il sottomenu successivo */
-.menu-item.open + .submenu {
-    display: block;
-}
+.menu-item.open + .submenu { display: block; }
 
-/* Foglia finale (il modello cliccabile) */
 .model-leaf {
-    padding: 12px 25px;
+    padding: 14px 20px 14px 30px;
     background: #1e293b;
-    color: #94a3b8;
     border-bottom: 1px solid #2d3a4f;
-    font-size: 13px;
-    cursor: pointer;
+    font-size: 14px;
 }
 
-.model-leaf:hover {
-    background: #334155;
-    color: white;
-}
-
-/* Badge di stato */
-.label-free { color: var(--accent-green); font-weight: bold; }
-.label-paid { color: var(--accent-orange); font-weight: bold; }
-
-/* Area Chat e Input */
+/* --- AREA MESSAGGI --- */
 .message-area {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
+    padding: 15px;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 12px;
+    /* Smooth scrolling per iOS */
+    -webkit-overflow-scrolling: touch; 
 }
 
+/* Fumetti messaggi ottimizzati */
+.message {
+    max-width: 85%;
+    padding: 12px 16px;
+    border-radius: 18px;
+    font-size: 15px;
+    line-height: 1.4;
+}
+
+.user {
+    align-self: flex-end;
+    background-color: var(--accent-blue);
+    border-bottom-right-radius: 4px;
+}
+
+.ai {
+    align-self: flex-start;
+    background-color: #334155;
+    border-bottom-left-radius: 4px;
+}
+
+/* --- INPUT FISSO IN BASSO --- */
 #input-area {
-    padding: 20px;
+    padding: 12px;
+    background: #1e293b;
     display: flex;
-    gap: 10px;
+    gap: 8px;
     border-top: 1px solid var(--border-color);
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)); /* Gestisce la "tacca" degli iPhone */
 }
 
 input#user-input {
     flex: 1;
     background: #0f172a;
     border: 1px solid var(--border-color);
-    padding: 12px;
-    border-radius: 8px;
+    padding: 14px;
+    border-radius: 25px; /* Look moderno a pillola */
     color: white;
+    font-size: 16px; /* Evita lo zoom automatico su iOS */
     outline: none;
 }
 
@@ -144,8 +149,13 @@ button#send-btn {
     background: var(--accent-blue);
     color: white;
     border: none;
-    padding: 12px 20px;
-    border-radius: 8px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
     cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     font-weight: bold;
+    flex-shrink: 0;
 }
