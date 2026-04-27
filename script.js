@@ -1,11 +1,7 @@
 /**
- * Configurazione Modulo Chat Principale
+ * Modulo Chat Principale (Core Logic)
+ * Richiede che config.js sia caricato prima di questo file.
  */
-window.CONFIG = {
-    API_KEY: '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',
-    API_URL: 'https://openrouter.ai/api/v1/chat/completions',
-    MODEL: 'nvidia/nemotron-4-340b-instruct'
-};
 
 let chatHistory = [];
 
@@ -14,7 +10,7 @@ const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 
 /**
- * Gestore principale dell'invio messaggi (Metodo Completo Aggiornato)
+ * Gestore principale dell'invio messaggi (Metodo Completo)
  */
 async function handleSendMessage() {
     const text = userInput.value.trim();
@@ -28,6 +24,11 @@ async function handleSendMessage() {
     toggleLoading(true);
 
     try {
+        // Null-Check: Verifica che il file di configurazione esista in memoria
+        if (!window.CONFIG || !window.CONFIG.API_KEY) {
+            throw new Error("File config.js non trovato o API Key mancante.");
+        }
+
         const response = await fetch(window.CONFIG.API_URL, {
             method: 'POST',
             headers: {
@@ -39,7 +40,7 @@ async function handleSendMessage() {
             body: JSON.stringify({
                 model: window.CONFIG.MODEL, 
                 messages: chatHistory,
-                include_reasoning: true // Forza OpenRouter a inviare il ragionamento se supportato
+                include_reasoning: true // Supporto per il reasoning-ui
             })
         });
 
@@ -52,23 +53,22 @@ async function handleSendMessage() {
         const messageObj = data.choices[0].message;
         
         let aiResponse = messageObj.content || '';
-        let reasoningText = messageObj.reasoning || ''; // Estrazione parametro nativo
+        let reasoningText = messageObj.reasoning || '';
 
-        // Fallback: Parsing dei tag <think> se il modello li inietta nel body del testo
+        // Estrazione del tag <think> se il modello lo inserisce nel testo puro
         const thinkRegex = /<think>([\s\S]*?)<\/think>/;
         const match = aiResponse.match(thinkRegex);
         if (match) {
             reasoningText = match[1].trim() + (reasoningText ? "\n" + reasoningText : "");
-            aiResponse = aiResponse.replace(thinkRegex, '').trim(); // Rimuove il tag dal messaggio finale
+            aiResponse = aiResponse.replace(thinkRegex, '').trim(); 
         }
 
-        // Passa sia il messaggio che il ragionamento (se presente) all'UI
         appendMessage(aiResponse, 'ai', reasoningText);
         chatHistory.push({ role: 'assistant', content: aiResponse });
 
     } catch (error) {
         console.error('Chat Error:', error);
-        appendMessage(`Errore API: ${error.message}`, 'ai');
+        appendMessage(`Errore di sistema: ${error.message}`, 'ai');
         chatHistory.pop(); 
     } finally {
         toggleLoading(false);
@@ -76,19 +76,18 @@ async function handleSendMessage() {
 }
 
 /**
- * Genera il fumetto della chat supportando il Componente di Ragionamento
+ * Gestore dell'interfaccia utente per l'aggiunta dei messaggi
  */
 function appendMessage(content, sender, reasoning = null) {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', sender);
     
-    // Controlla se abbiamo del ragionamento E se lo script UI è stato caricato
+    // Integrazione del componente Reasoning se presente nella scena
     if (reasoning && window.ReasoningUI) {
         const reasoningBlock = window.ReasoningUI.createReasoningBlock(reasoning);
         msgDiv.appendChild(reasoningBlock);
     }
     
-    // Contenitore per il testo del messaggio normale
     const textNode = document.createElement('div');
     textNode.textContent = content;
     msgDiv.appendChild(textNode);
@@ -103,6 +102,7 @@ function toggleLoading(isLoading) {
     if (!isLoading) userInput.focus();
 }
 
+// Event Listeners di input
 sendBtn.addEventListener('click', handleSendMessage);
 userInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') handleSendMessage();
