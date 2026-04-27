@@ -199,14 +199,10 @@ async function handleSendMessage() {
                         const dataObj = JSON.parse(dataStr);
                         const delta = dataObj.choices?.[0]?.delta;
 
-                        // ─── LOG DIAGNOSTICO ───────────────────────────────────────
-                        // Mostra ogni delta ricevuto per capire la struttura di OpenRouter.
-                        // Rimuovi questo blocco una volta che il reasoning funziona.
                         if (delta && Object.keys(delta).length > 0) {
                             chunkCount++;
                             console.log(`📦 Delta #${chunkCount}:`, JSON.stringify(delta));
                         }
-                        // ──────────────────────────────────────────────────────────
 
                         if (!delta) continue;
                         receivedValidData = true;
@@ -240,6 +236,21 @@ async function handleSendMessage() {
                     }
                 }
             }
+        }
+
+        // --- FORZATURA FINALE DEL RENDERING ---
+        // Esegue un aggiornamento sincrono garantito prima di chiudere lo stream
+        if (liveReasoning && displayReasoning) {
+            liveReasoning.updateText(displayReasoning);
+        } else if (displayReasoning) {
+            let reasoningEl = msgDiv.querySelector('.reasoning-fallback');
+            if (!reasoningEl) {
+                reasoningEl = document.createElement('div');
+                reasoningEl.className = 'reasoning-fallback';
+                reasoningEl.style.cssText = 'color:#9ca3af; font-size:12px; border-left:2px solid #374151; padding-left:8px; margin-bottom:8px; white-space:pre-wrap';
+                msgDiv.insertBefore(reasoningEl, textNode);
+            }
+            reasoningEl.textContent = `💭 ${displayReasoning}`;
         }
 
         // Chiusura e salvataggio
