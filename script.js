@@ -90,6 +90,7 @@ async function handleSendMessage() {
             model: window.CONFIG.MODEL,
             messages: chatHistory,
             stream: true,
+            include_reasoning: true,
             ...(isReasoningModel(window.CONFIG.MODEL) && { include_reasoning: true })
         };
 
@@ -200,6 +201,7 @@ async function handleSendMessage() {
                         receivedValidData = true;
 
                         if (delta.reasoning) nativeReasoningBuffer += delta.reasoning;
+                        if (delta.reasoning_content) nativeReasoningBuffer += delta.reasoning_content;
                         if (delta.content) rawContentBuffer += delta.content;
 
                         const thinkStart = rawContentBuffer.indexOf('<think>');
