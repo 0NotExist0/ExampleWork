@@ -1,5 +1,5 @@
 /**
- * Script Selezione Modelli Finale: Gerarchia Mobile-First + Sistema Preferiti Persistente + Ricerca + Multimodali.
+ * Script Selezione Modelli Finale: Gerarchia Mobile-First + Preferiti + Ricerca + Divisione Visione/Generazione
  * Guard anti-duplicato: evita doppia inizializzazione se lo script viene caricato due volte.
  */
 
@@ -34,6 +34,7 @@ if (!window.__modelSelectorLoaded) {
 
         mainTrigger.onclick = () => {
             mainTrigger.classList.toggle('open');
+            // Auto-focus sulla barra di ricerca quando si apre il menu
             if (mainTrigger.classList.contains('open')) {
                 const searchInput = document.getElementById('model-search-input');
                 if (searchInput) searchInput.focus();
@@ -51,25 +52,31 @@ if (!window.__modelSelectorLoaded) {
             
             renderAll();
             if (window.CONFIG) updateGlobalUI(window.CONFIG.MODEL);
-        } catch (e) { mainTrigger.innerHTML = "<span>❌ Errore di Rete</span>"; }
+        } catch (e) { 
+            mainTrigger.innerHTML = "<span>❌ Errore di Rete: Impossibile caricare i modelli</span>"; 
+        }
 
         function renderAll() {
             mainSubmenu.innerHTML = '';
             
             // --- 0. BARRA DI RICERCA ---
             const searchContainer = document.createElement('div');
+            // Stile inline di base per posizionamento sticky e visibilità
             searchContainer.style.cssText = 'padding: 8px; border-bottom: 1px solid #374151; position: sticky; top: 0; background: inherit; z-index: 10;';
             searchContainer.innerHTML = `
-                <input type="text" id="model-search-input" placeholder="🔍 Cerca modello..." 
+                <input type="text" id="model-search-input" placeholder="🔍 Cerca modello (es. flux, ocr, r1)..." 
                 style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; outline: none; box-sizing: border-box;">
             `;
             mainSubmenu.appendChild(searchContainer);
 
             const searchInput = searchContainer.querySelector('#model-search-input');
+
+            // Contenitore per i risultati di ricerca (inizialmente nascosto)
             const searchResultsContainer = document.createElement('div');
             searchResultsContainer.style.display = 'none';
             mainSubmenu.appendChild(searchResultsContainer);
 
+            // Contenitore per la normale gerarchia a cartelle
             const treeContainer = document.createElement('div');
             mainSubmenu.appendChild(treeContainer);
 
@@ -78,10 +85,12 @@ if (!window.__modelSelectorLoaded) {
                 const query = e.target.value.toLowerCase().trim();
                 
                 if (query === '') {
+                    // Ripristina la vista a cartelle
                     searchResultsContainer.style.display = 'none';
                     treeContainer.style.display = 'block';
                     searchResultsContainer.innerHTML = '';
                 } else {
+                    // Mostra i risultati "flat" nascondendo le cartelle
                     treeContainer.style.display = 'none';
                     searchResultsContainer.style.display = 'block';
                     searchResultsContainer.innerHTML = '';
@@ -96,6 +105,7 @@ if (!window.__modelSelectorLoaded) {
                         filtered.forEach(model => {
                             createModelLeaf(model, searchResultsContainer, () => {
                                 renderFavoriteLeaves(favSubmenu);
+                                // Aggiorna graficamente la stellina anche nei risultati di ricerca
                                 if (searchInput.value.trim() !== '') searchInput.dispatchEvent(new Event('input'));
                             });
                         });
@@ -103,7 +113,7 @@ if (!window.__modelSelectorLoaded) {
                 }
             });
 
-            // --- 1. CARTELLA PREFERITI ---
+            // --- 1. CARTELLA PREFERITI (Sempre in alto) ---
             const favFolderBtn = createFolderNode("⭐ I Miei Preferiti", treeContainer);
             favFolderBtn.classList.add('folder-fav');
             const favSubmenu = document.createElement('div');
@@ -114,43 +124,39 @@ if (!window.__modelSelectorLoaded) {
 
             // --- 2. GERARCHIA CATALOGO COMPLETO AGGIORNATA ---
             const tree = {
-                "🟢 GRATIS": { "Standard": [], "Reasoning": [], "🎨 Immagini & Video": [] },
-                "🟡 PREMIUM": { "Standard": [], "Reasoning": [], "🎨 Immagini & Video": [] }
+                "🟢 GRATIS": { "Standard": [], "Reasoning": [], "👁️ Visione (Legge Foto)": [], "🎨 Genera Immagini": [] },
+                "🟡 PREMIUM": { "Standard": [], "Reasoning": [], "👁️ Visione (Legge Foto)": [], "🎨 Genera Immagini": [] }
             };
 
             allModels.forEach(m => {
                 const idLow = m.id.toLowerCase();
                 const nameLow = m.name.toLowerCase();
                 
-                // Determina il costo
                 const isFree = (m.pricing?.prompt === "0" || idLow.includes(':free'));
-                
-                // Determina se è Reasoning
                 const isReasoning = idLow.includes('r1') || idLow.includes('reasoning') || nameLow.includes('think');
                 
-                // Determina se è Multimodale/Immagini/Video
-                let isMedia = false;
+                // Riconoscimento Modelli di GENERAZIONE IMMAGINI (Text-to-Image)
+                const genKeywords = ['flux', 'dall-e', 'stable-diffusion', 'sdxl', 'midjourney', 'image-generation'];
+                const isGeneration = genKeywords.some(kw => idLow.includes(kw) || nameLow.includes(kw));
+
+                // Riconoscimento Modelli di VISIONE/OCR (Image-to-Text)
+                const visKeywords = ['vision', 'ocr', 'pixtral', 'llava', 'vl', 'qwen-vl'];
+                let isVision = visKeywords.some(kw => idLow.includes(kw) || nameLow.includes(kw));
                 
-                // Controllo 1: tramite metadati ufficiali di OpenRouter (modality)
-                if (m.architecture && m.architecture.modality) {
+                // Fallback sui metadati di OpenRouter per identificare quelli non intercettati dal nome
+                if (!isGeneration && !isVision && m.architecture && m.architecture.modality) {
                     const modality = m.architecture.modality.toLowerCase();
-                    if (modality.includes('image') || modality.includes('video')) {
-                        isMedia = true;
-                    }
-                }
-                
-                // Controllo 2: fallback sulle keyword nel nome o ID se i metadati mancano
-                if (!isMedia) {
-                    const mediaKeywords = ['vision', 'flux', 'dall-e', 'stable-diffusion', 'sdxl', 'midjourney', 'runway', 'luma', 'kling', 'pixtral', 'image', 'video'];
-                    isMedia = mediaKeywords.some(kw => idLow.includes(kw) || nameLow.includes(kw));
+                    if (modality.includes('image')) isVision = true; 
                 }
 
-                // Assegnazione alla cartella corretta
+                // Smistamento logico
                 const branch = isFree ? "🟢 GRATIS" : "🟡 PREMIUM";
                 let leaf = "Standard";
                 
-                if (isMedia) {
-                    leaf = "🎨 Immagini & Video";
+                if (isGeneration) {
+                    leaf = "🎨 Genera Immagini";
+                } else if (isVision) {
+                    leaf = "👁️ Visione (Legge Foto)";
                 } else if (isReasoning) {
                     leaf = "Reasoning";
                 }
@@ -158,7 +164,7 @@ if (!window.__modelSelectorLoaded) {
                 tree[branch][leaf].push(m);
             });
 
-            // Rendering del menu
+            // Rendering della struttura ad albero
             for (let branch in tree) {
                 const branchBtn = createFolderNode(branch, treeContainer);
                 const branchSub = document.createElement('div');
@@ -166,7 +172,7 @@ if (!window.__modelSelectorLoaded) {
                 treeContainer.appendChild(branchSub);
 
                 for (let leaf in tree[branch]) {
-                    if (tree[branch][leaf].length === 0) continue;
+                    if (tree[branch][leaf].length === 0) continue; // Salta le cartelle vuote
                     const leafBtn = createFolderNode(leaf, branchSub);
                     const leafSub = document.createElement('div');
                     leafSub.className = 'submenu';
@@ -180,6 +186,7 @@ if (!window.__modelSelectorLoaded) {
         }
 
         // --- FUNZIONI CREAZIONE NODI ---
+
         function createFolderNode(label, parent) {
             const div = document.createElement('div');
             div.className = 'menu-item';
@@ -206,7 +213,7 @@ if (!window.__modelSelectorLoaded) {
                     window.CONFIG.MODEL = model.id;
                     updateGlobalUI(model.id);
                 }
-                mainTrigger.classList.remove('open');
+                mainTrigger.classList.remove('open'); // Chiude il menu principale dopo la selezione
             };
 
             leaf.querySelector('.fav-toggle').onclick = (e) => {
@@ -214,6 +221,7 @@ if (!window.__modelSelectorLoaded) {
                 toggleFavorite(model.id);
                 onFavChange();
                 
+                // Aggiorna lo stato visivo della singola foglia
                 const btn = e.currentTarget;
                 if (favoriteIds.includes(model.id)) {
                     btn.classList.add('active');
@@ -238,7 +246,7 @@ if (!window.__modelSelectorLoaded) {
             });
         }
 
-        // --- LOGICA PREFERITI ---
+        // --- LOGICA PREFERITI E AGGIORNAMENTO GLOBALE ---
         function toggleFavorite(id) {
             if (favoriteIds.includes(id)) {
                 favoriteIds = favoriteIds.filter(favId => favId !== id);
@@ -252,6 +260,7 @@ if (!window.__modelSelectorLoaded) {
             const activeNameTag = document.getElementById('active-model-name');
             const statusIndicator = document.querySelector('.status-indicator');
             const shortName = modelId.split('/').pop();
+            
             if (activeNameTag) activeNameTag.innerText = shortName;
             if (statusIndicator) statusIndicator.innerHTML = `Online - <span style="color:#60a5fa">${shortName}</span>`;
         }
