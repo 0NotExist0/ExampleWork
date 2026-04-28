@@ -12,10 +12,10 @@ if (!window.__modelSelectorLoaded) {
             free: [
                 { id: "black-forest-labs/FLUX.1-schnell",         name: "FLUX.1 Schnell (veloce)" },
                 { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "Stable Diffusion XL" },
-                { id: "enhanceaiteam/Flux-Uncensored-V2",         name: "FLUX Uncensored V2" },
             ],
             pro: [
                 { id: "black-forest-labs/FLUX.1-dev",                    name: "FLUX.1 Dev (qualità)" },
+                { id: "enhanceaiteam/Flux-Uncensored-V2",                name: "FLUX Uncensored V2" },
                 { id: "stabilityai/stable-diffusion-3.5-large",          name: "Stable Diffusion 3.5 Large" },
                 { id: "stabilityai/stable-diffusion-3-medium-diffusers", name: "Stable Diffusion 3 Medium" },
                 { id: "Shakker-Labs/FLUX.1-dev-LoRA-AntiBlur",           name: "FLUX AntiBlur" },
@@ -350,10 +350,27 @@ if (!window.__modelSelectorLoaded) {
 
                     if (provider === 'huggingface') {
                         window.CONFIG.API_URL = `https://api-inference.huggingface.co/models/${model.id}`;
-                        if (window.CONFIG.HF_API_KEY) {
-                            window.CONFIG._activeKey = window.CONFIG.HF_API_KEY;
+
+                        // Leggi la chiave HF: prima da CONFIG, poi da localStorage (qualsiasi chiave che inizia con "hf_")
+                        const hfKey = window.CONFIG.HF_API_KEY
+                            || (() => {
+                                for (let i = 0; i < localStorage.length; i++) {
+                                    const k = localStorage.key(i);
+                                    if (k && k.toUpperCase().startsWith('HUGGINGFACE')) {
+                                        const v = localStorage.getItem(k);
+                                        if (v && v.startsWith('hf_')) return v;
+                                    }
+                                }
+                                return null;
+                            })();
+
+                        if (hfKey) {
+                            window.CONFIG._activeKey = hfKey;
+                            console.log('🤗 Chiave HF impostata correttamente:', hfKey.substring(0, 8) + '...');
+                        } else {
+                            console.error('❌ Nessuna chiave HF trovata! Aggiungila nelle impostazioni come HF_API_KEY.');
                         }
-                        // Avviso se si seleziona un modello Pro
+
                         if (hfTier === 'pro') {
                             console.warn(`⚠️ [HF Pro] "${model.name}" richiede un abbonamento HF Pro attivo e l'accettazione della licenza su huggingface.co`);
                         }
