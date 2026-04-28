@@ -1,416 +1,177 @@
 /**
- * Model Selector — OpenRouter + HuggingFace (Immagini & Video Generativi)
- * Guard anti-duplicato
+ * Model Selector Avanzato — Integrato con Scansione Dinamica HF
  */
 
 if (!window.__modelSelectorLoaded) {
     window.__modelSelectorLoaded = true;
 
-    // ─── Modelli HuggingFace — separati per tier ──────────────────────────────
-    const HF_MODELS = {
-        "🎨 Genera Immagini": {
-            free: [
-                { id: "black-forest-labs/FLUX.1-schnell",         name: "FLUX.1 Schnell (veloce)" },
-                { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "Stable Diffusion XL" },
-                { id: "enhanceaiteam/Flux-Uncensored-V2",         name: "FLUX Uncensored V2" },
-            ],
-            pro: [
-                { id: "black-forest-labs/FLUX.1-dev",                    name: "FLUX.1 Dev (qualità)" },
-                { id: "stabilityai/stable-diffusion-3.5-large",          name: "Stable Diffusion 3.5 Large" },
-                { id: "stabilityai/stable-diffusion-3-medium-diffusers", name: "Stable Diffusion 3 Medium" },
-                { id: "Shakker-Labs/FLUX.1-dev-LoRA-AntiBlur",           name: "FLUX AntiBlur" },
-            ],
-        },
-        "🎬 Genera Video": {
-            free: [
-                { id: "ali-vilab/text-to-video-ms-1.7b", name: "Text-to-Video MS 1.7B" },
-                { id: "genmo/mochi-1-preview",            name: "Mochi 1 Preview" },
-                { id: "Lightricks/LTX-Video",             name: "LTX Video" },
-            ],
-            pro: [
-                { id: "stabilityai/stable-video-diffusion-img2vid-xt", name: "Stable Video Diffusion XT" },
-                { id: "Wan-AI/Wan2.1-T2V-14B-Diffusers",              name: "Wan2.1 T2V 14B" },
-                { id: "tencent/HunyuanVideo",                         name: "HunyuanVideo" },
-            ],
-        }
-    };
-
-    // Flat list per ricerca e preferiti
-    function allHfModels() {
-        const out = [];
-        for (const cat of Object.values(HF_MODELS)) {
-            cat.free.forEach(m => out.push({ ...m, _hfTier: 'free' }));
-            cat.pro.forEach(m => out.push({ ...m, _hfTier: 'pro' }));
-        }
-        return out;
-    }
-    // ─────────────────────────────────────────────────────────────────────────
+    // Modelli HF "Sempre Presenti" (Hardcoded)
+    const FIXED_HF_MODELS = [
+        { id: "black-forest-labs/FLUX.1-schnell", name: "FLUX.1 Schnell", tier: 'free' },
+        { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "SDXL Base", tier: 'free' }
+    ];
 
     async function initModelSelector() {
         const header = document.querySelector('header');
         if (!header || document.getElementById('model-menu-root')) return;
 
-        // Stili badge tier
+        // Iniezione Stili (Tier Badge)
         const styleTag = document.createElement('style');
         styleTag.textContent = `
-            .hf-badge-free {
-                font-size: 9px;
-                background: #065f46;
-                color: #6ee7b7;
-                padding: 1px 5px;
-                border-radius: 3px;
-                margin-left: 4px;
-                font-weight: bold;
-                letter-spacing: 0.3px;
-            }
-            .hf-badge-pro {
-                font-size: 9px;
-                background: #78350f;
-                color: #fcd34d;
-                padding: 1px 5px;
-                border-radius: 3px;
-                margin-left: 4px;
-                font-weight: bold;
-                letter-spacing: 0.3px;
-            }
-            .tier-header-free {
-                padding: 4px 12px 2px;
-                font-size: 10px;
-                color: #6ee7b7;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-                border-top: 1px solid #1f4037;
-                margin-top: 4px;
-            }
-            .tier-header-pro {
-                padding: 4px 12px 2px;
-                font-size: 10px;
-                color: #fcd34d;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-                border-top: 1px solid #44200a;
-                margin-top: 4px;
-            }
-            .tier-pro-warning {
-                padding: 2px 12px 6px;
-                font-size: 10px;
-                color: #9ca3af;
-                font-style: italic;
-            }
+            .hf-badge-free { font-size: 9px; background: #065f46; color: #6ee7b7; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: bold; }
+            .hf-badge-pro { font-size: 9px; background: #78350f; color: #fcd34d; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: bold; }
+            .tier-header { padding: 4px 12px; font-size: 10px; color: #9ca3af; font-weight: bold; text-transform: uppercase; border-top: 1px solid #374151; margin-top: 5px; }
         `;
         document.head.appendChild(styleTag);
 
-        // ── Root container ──
         const rootContainer = document.createElement('div');
         rootContainer.id = 'model-menu-root';
-
-        const mainTrigger = document.createElement('div');
-        mainTrigger.className = 'menu-item';
-        mainTrigger.innerHTML = `
-            <span>📂 <b>Catalogo & Preferiti</b></span>
-            <span id="active-model-name" style="color:#60a5fa;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;">Caricamento...</span>
-            <span class="arrow">▶</span>
+        rootContainer.innerHTML = `
+            <div class="menu-item" id="main-trigger">
+                <span>📂 <b>Catalogo & Preferiti</b></span>
+                <span id="active-model-name" style="color:#60a5fa;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;">Caricamento...</span>
+                <span class="arrow">▶</span>
+            </div>
+            <div class="submenu" id="main-submenu"></div>
         `;
-
-        const mainSubmenu = document.createElement('div');
-        mainSubmenu.className = 'submenu';
-
-        rootContainer.appendChild(mainTrigger);
-        rootContainer.appendChild(mainSubmenu);
         header.parentNode.insertBefore(rootContainer, header.nextSibling);
 
-        mainTrigger.onclick = () => {
-            mainTrigger.classList.toggle('open');
-            if (mainTrigger.classList.contains('open')) {
-                const s = document.getElementById('model-search-input');
-                if (s) s.focus();
-            }
-        };
+        const mainTrigger = rootContainer.querySelector('#main-trigger');
+        const mainSubmenu = rootContainer.querySelector('#main-submenu');
 
-        // ── Stato ──
+        mainTrigger.onclick = () => mainTrigger.classList.toggle('open');
+
         let allOpenRouterModels = [];
+        let dynamicHfModels = [];
         let favoriteIds = JSON.parse(localStorage.getItem('nemotron_favorites')) || [];
 
-        // ── Fetch OpenRouter ──
+        // ─── CARICAMENTO DATI ───
         try {
-            const res  = await fetch('https://openrouter.ai/api/v1/models');
-            const data = await res.json();
-            allOpenRouterModels = data.data.sort((a, b) => a.id.localeCompare(b.id));
+            // 1. Fetch OpenRouter
+            const orRes = await fetch('https://openrouter.ai/api/v1/models');
+            const orData = await orRes.json();
+            allOpenRouterModels = orData.data;
+
+            // 2. Scansione Dinamica HuggingFace (I migliori 50 gratuiti)
+            const hfRes = await fetch('https://huggingface.co/api/models?pipeline_tag=text-to-image&sort=downloads&direction=-1&limit=50&filter=inference');
+            dynamicHfModels = await hfRes.json();
+            
+            renderAll();
         } catch (e) {
-            mainTrigger.innerHTML = "<span>❌ Errore rete: impossibile caricare i modelli OpenRouter</span>";
+            console.error("Errore caricamento modelli:", e);
         }
 
-        renderAll();
-        if (window.CONFIG) updateGlobalUI(window.CONFIG.MODEL, window.CONFIG.PROVIDER || 'openrouter');
-
-        // ════════════════════════════════════════════════════════════════════
         function renderAll() {
             mainSubmenu.innerHTML = '';
-
-            // ── Barra di ricerca ──
+            
+            // Barra di ricerca
             const searchWrap = document.createElement('div');
-            searchWrap.style.cssText = 'padding:8px;border-bottom:1px solid #374151;position:sticky;top:0;background:inherit;z-index:10;';
-            searchWrap.innerHTML = `<input type="text" id="model-search-input"
-                placeholder="🔍 Cerca modello (es. flux, ocr, r1)..."
-                style="width:100%;padding:6px 10px;border-radius:4px;border:1px solid #4b5563;background:#1f2937;color:white;font-size:13px;outline:none;box-sizing:border-box;">`;
+            searchWrap.style.padding = '8px';
+            searchWrap.innerHTML = `<input type="text" id="model-search" placeholder="🔍 Cerca nel cloud..." style="width:100%; padding:6px; background:#1f2937; color:white; border:1px solid #4b5563; border-radius:4px;">`;
             mainSubmenu.appendChild(searchWrap);
+            
+            const listCont = document.createElement('div');
+            mainSubmenu.appendChild(listCont);
 
-            const searchResults = document.createElement('div');
-            searchResults.style.display = 'none';
-            mainSubmenu.appendChild(searchResults);
+            // 1. Cartella Preferiti
+            const favDir = createFolder("⭐ Preferiti", listCont);
+            const favSub = createSubmenu(listCont);
+            renderFavorites(favSub);
 
-            const treeContainer = document.createElement('div');
-            mainSubmenu.appendChild(treeContainer);
+            // 2. Cartella OpenRouter
+            const orDir = createFolder("🔀 OpenRouter", listCont);
+            const orSub = createSubmenu(listCont);
+            allOpenRouterModels.forEach(m => createLeaf(m, 'openrouter', null, orSub, () => renderFavorites(favSub)));
 
-            const searchInput = searchWrap.querySelector('#model-search-input');
-
-            // Filtraggio live
-            searchInput.addEventListener('input', e => {
-                const q = e.target.value.toLowerCase().trim();
-                if (!q) {
-                    searchResults.style.display = 'none';
-                    treeContainer.style.display = 'block';
-                    searchResults.innerHTML = '';
-                    return;
-                }
-                treeContainer.style.display = 'none';
-                searchResults.style.display = 'block';
-                searchResults.innerHTML = '';
-
-                // OpenRouter
-                allOpenRouterModels
-                    .filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
-                    .forEach(m => createModelLeaf(m, 'openrouter', null, searchResults, () => renderFavLeaves(favSub)));
-
-                // HuggingFace (free + pro)
-                allHfModels()
-                    .filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
-                    .forEach(m => createModelLeaf(m, 'huggingface', m._hfTier, searchResults, () => renderFavLeaves(favSub)));
-
-                if (searchResults.children.length === 0)
-                    searchResults.innerHTML = '<div class="model-leaf" style="font-style:italic;opacity:.5;padding:8px 12px;">Nessun risultato trovato...</div>';
+            // 3. Cartella HuggingFace (Dinamica)
+            const hfDir = createFolder("🤗 HuggingFace (Gratis)", listCont);
+            const hfSub = createSubmenu(listCont);
+            
+            // Uniamo i fissi con i dinamici
+            const combinedHf = [...FIXED_HF_MODELS];
+            dynamicHfModels.forEach(m => {
+                if(!combinedHf.find(x => x.id === m.id)) combinedHf.push({ id: m.id, name: m.id.split('/')[1], tier: 'free' });
             });
 
-            // ── 1. Preferiti ──
-            const favBtn = createFolderNode("⭐ I Miei Preferiti", treeContainer);
-            favBtn.classList.add('folder-fav');
-            const favSub = document.createElement('div');
-            favSub.className = 'submenu';
-            treeContainer.appendChild(favSub);
-            renderFavLeaves(favSub);
-
-            // ── 2. OpenRouter tree ──
-            buildOpenRouterTree(treeContainer, favSub);
-
-            // ── 3. HuggingFace tree ──
-            buildHuggingFaceTree(treeContainer, favSub);
+            combinedHf.forEach(m => createLeaf(m, 'huggingface', m.tier, hfSub, () => renderFavorites(favSub)));
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        function buildOpenRouterTree(parent, favSub) {
-            const tree = {
-                "🟢 GRATIS":   { "Standard": [], "Reasoning": [], "👁️ Visione": [], "🎨 Genera Immagini": [] },
-                "🟡 PREMIUM":  { "Standard": [], "Reasoning": [], "👁️ Visione": [], "🎨 Genera Immagini": [] }
-            };
-
-            allOpenRouterModels.forEach(m => {
-                const idL = m.id.toLowerCase();
-                const nL  = m.name.toLowerCase();
-                const isFree      = m.pricing?.prompt === "0" || idL.includes(':free');
-                const isReasoning = idL.includes('r1') || idL.includes('reasoning') || nL.includes('think');
-                const genKw  = ['flux','dall-e','stable-diffusion','sdxl','image-generation'];
-                const isGen  = genKw.some(k => idL.includes(k) || nL.includes(k));
-                const visKw  = ['vision','ocr','pixtral','llava','vl','qwen-vl'];
-                let   isVis  = visKw.some(k => idL.includes(k) || nL.includes(k));
-                if (!isGen && !isVis && m.architecture?.modality?.toLowerCase().includes('image')) isVis = true;
-
-                const branch = isFree ? "🟢 GRATIS" : "🟡 PREMIUM";
-                const leaf   = isGen ? "🎨 Genera Immagini" : isVis ? "👁️ Visione" : isReasoning ? "Reasoning" : "Standard";
-                tree[branch][leaf].push(m);
-            });
-
-            createFolderNode("🔀 OpenRouter", parent);
-            const orSub = document.createElement('div');
-            orSub.className = 'submenu';
-            parent.appendChild(orSub);
-
-            for (const branch in tree) {
-                createFolderNode(branch, orSub);
-                const bSub = document.createElement('div');
-                bSub.className = 'submenu';
-                orSub.appendChild(bSub);
-
-                for (const leaf in tree[branch]) {
-                    if (!tree[branch][leaf].length) continue;
-                    createFolderNode(leaf, bSub);
-                    const lSub = document.createElement('div');
-                    lSub.className = 'submenu';
-                    bSub.appendChild(lSub);
-                    tree[branch][leaf].forEach(m => createModelLeaf(m, 'openrouter', null, lSub, () => renderFavLeaves(favSub)));
-                }
-            }
-        }
-
-        // ════════════════════════════════════════════════════════════════════
-        // HuggingFace: sezione con tier FREE / PRO separati per categoria
-        function buildHuggingFaceTree(parent, favSub) {
-            createFolderNode("🤗 HuggingFace", parent);
-            const hfSub = document.createElement('div');
-            hfSub.className = 'submenu';
-            parent.appendChild(hfSub);
-
-            // Nota chiave API
-            const note = document.createElement('div');
-            note.style.cssText = 'padding:6px 12px;font-size:11px;color:#9ca3af;border-bottom:1px solid #374151;';
-            note.textContent = '⚠️ Richiede HF_API_KEY in CONFIG.';
-            hfSub.appendChild(note);
-
-            for (const [category, tiers] of Object.entries(HF_MODELS)) {
-                // Cartella categoria (es. "🎨 Genera Immagini")
-                createFolderNode(category, hfSub);
-                const catSub = document.createElement('div');
-                catSub.className = 'submenu';
-                hfSub.appendChild(catSub);
-
-                // ── Tier GRATUITO ──
-                if (tiers.free.length > 0) {
-                    const freeHeader = document.createElement('div');
-                    freeHeader.className = 'tier-header-free';
-                    freeHeader.textContent = '✅ Gratuito (Inference API)';
-                    catSub.appendChild(freeHeader);
-                    tiers.free.forEach(m =>
-                        createModelLeaf(m, 'huggingface', 'free', catSub, () => renderFavLeaves(favSub))
-                    );
-                }
-
-                // ── Tier PRO ──
-                if (tiers.pro.length > 0) {
-                    const proHeader = document.createElement('div');
-                    proHeader.className = 'tier-header-pro';
-                    proHeader.textContent = '🔒 Richiede HF Pro';
-                    catSub.appendChild(proHeader);
-
-                    const proWarn = document.createElement('div');
-                    proWarn.className = 'tier-pro-warning';
-                    proWarn.textContent = 'Abbonamento a pagamento o modello gated (licenza da accettare su HF)';
-                    catSub.appendChild(proWarn);
-
-                    tiers.pro.forEach(m =>
-                        createModelLeaf(m, 'huggingface', 'pro', catSub, () => renderFavLeaves(favSub))
-                    );
-                }
-            }
-        }
-
-        // ════════════════════════════════════════════════════════════════════
-        // Nodi UI
-
-        function createFolderNode(label, parent) {
+        // ─── HELPER UI ───
+        function createFolder(label, parent) {
             const div = document.createElement('div');
             div.className = 'menu-item';
             div.innerHTML = `<span>${label}</span><span class="arrow">▶</span>`;
-            div.onclick = e => { e.stopPropagation(); div.classList.toggle('open'); };
+            div.onclick = (e) => { e.stopPropagation(); div.classList.toggle('open'); };
             parent.appendChild(div);
             return div;
         }
 
-        /**
-         * @param {object} model    { id, name }
-         * @param {string} provider 'openrouter' | 'huggingface'
-         * @param {string|null} hfTier  'free' | 'pro' | null
-         * @param {Element} parent
-         * @param {Function} onFavChange
-         */
-        function createModelLeaf(model, provider, hfTier, parent, onFavChange) {
-            const leaf = document.createElement('div');
-            leaf.className = 'menu-item model-leaf';
+        function createSubmenu(parent) {
+            const div = document.createElement('div');
+            div.className = 'submenu';
+            parent.appendChild(div);
+            return div;
+        }
+
+        function createLeaf(model, provider, tier, parent, onFavChange) {
+            const div = document.createElement('div');
+            div.className = 'menu-item model-leaf';
             const isFav = favoriteIds.includes(model.id);
-
-            let badge = '';
-            if (provider === 'huggingface') {
-                if (hfTier === 'pro') {
-                    badge = '<span class="hf-badge-pro">HF PRO</span>';
-                } else {
-                    badge = '<span class="hf-badge-free">HF FREE</span>';
-                }
-            }
-
-            leaf.innerHTML = `
-                <span class="model-name" title="${model.id}">${model.name}${badge}</span>
-                <button class="fav-toggle ${isFav ? 'active' : ''}" title="Aggiungi ai preferiti">★</button>
+            const badge = tier ? `<span class="hf-badge-${tier}">${tier.toUpperCase()}</span>` : '';
+            
+            div.innerHTML = `
+                <span class="name" title="${model.id}">${model.name || model.id}${badge}</span>
+                <span class="fav ${isFav ? 'active' : ''}">★</span>
             `;
 
-            leaf.querySelector('.model-name').onclick = e => {
+            // Click sul nome: Seleziona il modello
+            div.querySelector('.name').onclick = (e) => {
                 e.stopPropagation();
-                if (window.CONFIG) {
-                    window.CONFIG.MODEL    = model.id;
-                    window.CONFIG.PROVIDER = provider;
-
-                    if (provider === 'huggingface') {
-                        window.CONFIG.API_URL = `https://api-inference.huggingface.co/models/${model.id}`;
-                        if (window.CONFIG.HF_API_KEY) {
-                            window.CONFIG._activeKey = window.CONFIG.HF_API_KEY;
-                        }
-                        // Avviso se si seleziona un modello Pro
-                        if (hfTier === 'pro') {
-                            console.warn(`⚠️ [HF Pro] "${model.name}" richiede un abbonamento HF Pro attivo e l'accettazione della licenza su huggingface.co`);
-                        }
-                    } else {
-                        window.CONFIG.API_URL    = window.CONFIG.OR_API_URL || 'https://openrouter.ai/api/v1/chat/completions';
-                        window.CONFIG._activeKey = window.CONFIG.API_KEY;
-                    }
-
-                    updateGlobalUI(model.id, provider, hfTier);
-                }
-                document.querySelector('#model-menu-root .menu-item')?.classList.remove('open');
+                selectModel(model.id, provider, tier);
             };
 
-            leaf.querySelector('.fav-toggle').onclick = e => {
+            // Click sulla stella: Preferiti
+            div.querySelector('.fav').onclick = (e) => {
                 e.stopPropagation();
                 toggleFav(model.id);
-                e.currentTarget.classList.toggle('active', favoriteIds.includes(model.id));
-                onFavChange();
+                renderFavorites(document.querySelector('.folder-fav + .submenu')); // Aggiorna UI preferiti
+                div.querySelector('.fav').classList.toggle('active');
             };
 
-            parent.appendChild(leaf);
+            parent.appendChild(div);
         }
 
-        function renderFavLeaves(container) {
-            container.innerHTML = '';
-            if (!favoriteIds.length) {
-                container.innerHTML = '<div class="model-leaf" style="font-style:italic;opacity:.5;padding:8px 12px;">Nessun preferito...</div>';
-                return;
+        function selectModel(id, provider, tier) {
+            if (!window.CONFIG) return;
+            window.CONFIG.MODEL = id;
+            window.CONFIG.PROVIDER = provider;
+
+            // Se è HF, configuriamo il proxy
+            if (provider === 'huggingface') {
+                window.CONFIG.API_URL = '/api/hf-proxy';
+            } else {
+                window.CONFIG.API_URL = 'https://openrouter.ai/api/v1/chat/completions';
             }
-            const flatHf = allHfModels();
-            favoriteIds.forEach(id => {
-                const orModel = allOpenRouterModels.find(m => m.id === id);
-                const hfModel = flatHf.find(m => m.id === id);
-                if (orModel) createModelLeaf(orModel, 'openrouter', null, container, () => renderFavLeaves(container));
-                else if (hfModel) createModelLeaf(hfModel, 'huggingface', hfModel._hfTier, container, () => renderFavLeaves(container));
-                else createModelLeaf({ id, name: id }, 'openrouter', null, container, () => renderFavLeaves(container));
-            });
+
+            // Aggiorna UI globale
+            document.getElementById('active-model-name').innerText = id.split('/').pop();
+            const status = document.querySelector('.status-indicator');
+            if (status) status.innerHTML = `Online - <span style="color:#60a5fa">${id.split('/').pop()}</span>`;
+            
+            console.log(`🎯 Modello attivo: ${id} (${provider})`);
         }
 
-        // ── Helpers ──
         function toggleFav(id) {
-            favoriteIds = favoriteIds.includes(id)
-                ? favoriteIds.filter(f => f !== id)
-                : [...favoriteIds, id];
+            favoriteIds = favoriteIds.includes(id) ? favoriteIds.filter(f => f !== id) : [...favoriteIds, id];
             localStorage.setItem('nemotron_favorites', JSON.stringify(favoriteIds));
         }
 
-        function updateGlobalUI(modelId, provider = 'openrouter', hfTier = null) {
-            const tag  = document.getElementById('active-model-name');
-            const stat = document.querySelector('.status-indicator');
-            const short = modelId.split('/').pop();
-            let prefix = '';
-            if (provider === 'huggingface') {
-                prefix = hfTier === 'pro' ? '🔒 ' : '🤗 ';
-            }
-            if (tag)  tag.innerText = prefix + short;
-            if (stat) stat.innerHTML = `Online - <span style="color:#60a5fa">${prefix}${short}</span>`;
+        function renderFavorites(container) {
+            if (!container) return;
+            container.innerHTML = favoriteIds.length ? '' : '<div style="padding:10px; font-style:italic; opacity:0.5;">Nessun preferito</div>';
+            favoriteIds.forEach(id => {
+                createLeaf({id, name: id.split('/').pop()}, 'huggingface', 'free', container, () => renderFavorites(container));
+            });
         }
     }
 
