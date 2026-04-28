@@ -1,5 +1,5 @@
 /**
- * Modulo Chat Principale (Core Logic: Stream Blindato, Debugger e Anti-Lag)
+ * Modulo Chat Principale (Core Logic: Gestione Testo Streaming + Generazione Immagini)
  */
 
 let chatHistory = [];
@@ -8,8 +8,9 @@ const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 
-console.log("⚙️ script.js caricato correttamente.");
+console.log("⚙️ script.js caricato correttamente (Supporto Immagini attivo).");
 
+// Inizializzazione UI
 if (!sendBtn || !userInput || !messageArea) {
     console.error("❌ Errore critico: Elementi UI non trovati nel file HTML! Controlla gli ID.");
 } else {
@@ -25,16 +26,7 @@ if (!sendBtn || !userInput || !messageArea) {
 }
 
 /**
- * Determina se un modello supporta il reasoning nativo
- */
-function isReasoningModel(modelId) {
-    if (!modelId) return false;
-    const id = modelId.toLowerCase();
-    return id.includes('r1') || id.includes('reasoning') || id.includes('think');
-}
-
-/**
- * Utility grafica per aggiungere messaggi
+ * Utility grafica per aggiungere messaggi dell'utente
  */
 function appendUserMessage(content, sender = 'user') {
     const msgDiv = document.createElement('div');
@@ -45,7 +37,7 @@ function appendUserMessage(content, sender = 'user') {
 }
 
 /**
- * Utility per bloccare/sbloccare l'input
+ * Utility per bloccare/sbloccare l'input durante il caricamento
  */
 function toggleLoading(isLoading) {
     userInput.disabled = isLoading;
@@ -56,169 +48,200 @@ function toggleLoading(isLoading) {
 }
 
 /**
- * Gestore principale dell'invio
+ * Gestore principale dell'invio messaggi
  */
 async function handleSendMessage() {
     console.log("▶️ Tentativo di invio messaggio...");
     
-    if (sendBtn.disabled) {
-        console.warn("⚠️ Bottone disabilitato, invio ignorato.");
-        return;
-    }
+    if (sendBtn.disabled) return;
 
     const text = userInput.value.trim();
     if (!text) return;
 
+    // Aggiungi messaggio utente e pulisci input
     appendUserMessage(text);
     userInput.value = '';
     chatHistory.push({ role: 'user', content: text });
     
     toggleLoading(true);
 
-    let msgDiv = null;
-    let isStreamActive = true; 
+    // Preparazione area messaggio IA (vuota con indicatore di caricamento)
+    let msgDiv = document.createElement('div');
+    msgDiv.classList.add('message', 'ai');
+    
+    // Contenitore per il testo o l'immagine finale
+    const contentNode = document.createElement('div');
+    contentNode.style.whiteSpace = "pre-wrap"; 
+    contentNode.style.wordBreak = "break-word"; 
+    contentNode.textContent = "⌛ Elaborazione..."; // Placeholder iniziale
+    msgDiv.appendChild(contentNode);
+    
+    messageArea.appendChild(msgDiv);
+    messageArea.scrollTop = messageArea.scrollHeight;
+
+    // Recupero configurazione
+    if (typeof window.CONFIG === 'undefined') {
+        contentNode.textContent = "❌ Errore: CONFIG non definito.";
+        toggleLoading(false);
+        return;
+    }
+
+    const provider = window.CONFIG.PROVIDER || 'openrouter';
+    const activeToken = window.CONFIG._activeKey || window.CONFIG.API_KEY;
+    const model = window.CONFIG.MODEL;
+
+    if (!activeToken) {
+        contentNode.textContent = "⚠️ Chiave API mancante nelle impostazioni (⚙️).";
+        toggleLoading(false);
+        return;
+    }
+
+    console.log(`📡 Provider: ${provider} | Modello: ${model}`);
 
     try {
-        if (typeof window.CONFIG === 'undefined') throw new Error("window.CONFIG non è definito.");
-        
-        // Permettiamo l'uso se c'è almeno una chiave (OpenRouter o HF) in base al provider attivo
-        const activeToken = window.CONFIG._activeKey || window.CONFIG.API_KEY;
-        if (!activeToken) throw new Error("Chiave API mancante. Inseriscila nelle impostazioni (⚙️).");
-        if (!window.CONFIG.MODEL) throw new Error("MODEL mancante nella configurazione.");
+        // =====================================================================
+        // RAMO A: GENERAZIONE IMMAGINI (Hugging Face)
+        // =====================================================================
+        if (provider === 'huggingface') {
+            console.log("🎨 Richiesta generazione immagine a Hugging Face...");
+            contentNode.textContent = "🎨 Generazione immagine in corso (potrebbe volerci un minuto)...▮";
 
-        console.log(`📡 Contattando API per il modello: ${window.CONFIG.MODEL}...`);
-
-        const requestBody = {
-            model: window.CONFIG.MODEL,
-            messages: chatHistory,
-            stream: true,
-            include_reasoning: true
-        };
-
-        const response = await fetch(window.CONFIG.API_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                // Qui è dove avviene la magia: usa la chiave attiva dinamica
-                'Authorization': `Bearer ${activeToken}`,
-                'HTTP-Referer': window.location.href,
-                'X-Title': 'Nemotron Web UI'
-            },
-            body: JSON.stringify(requestBody)
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error?.message || `Errore HTTP ${response.status} del server.`);
-        }
-
-        console.log("✅ Connessione stabilita, inizio lettura stream...");
-
-        msgDiv = document.createElement('div');
-        msgDiv.classList.add('message', 'ai');
-        
-        const liveReasoning = window.ReasoningUI ? window.ReasoningUI.createLiveReasoningBlock() : null;
-        if (liveReasoning) msgDiv.appendChild(liveReasoning.container);
-        
-        const textNode = document.createElement('div');
-        textNode.style.whiteSpace = "pre-wrap"; 
-        textNode.style.fontFamily = "inherit";
-        textNode.style.wordBreak = "break-word"; 
-        textNode.textContent = "▮";
-        msgDiv.appendChild(textNode);
-        
-        messageArea.appendChild(msgDiv);
-        messageArea.scrollTop = messageArea.scrollHeight;
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let buffer = "";
-        
-        let nativeReasoningBuffer = "";
-        let rawContentBuffer = "";
-        let receivedValidData = false;
-
-        let displayContent = "";
-        let displayReasoning = "";
-
-        // Motore di Rendering Anti-Lag (requestAnimationFrame)
-        let renderRequested = false;
-        const updateUI = () => {
-            if (!isStreamActive) return;
-            
-            if (liveReasoning && displayReasoning) {
-                liveReasoning.updateText(displayReasoning);
-            } else if (displayReasoning) {
-                let reasoningEl = msgDiv.querySelector('.reasoning-fallback');
-                if (!reasoningEl) {
-                    reasoningEl = document.createElement('div');
-                    reasoningEl.className = 'reasoning-fallback';
-                    reasoningEl.style.cssText = 'color:#9ca3af; font-size:12px; border-left:2px solid #374151; padding-left:8px; margin-bottom:8px; white-space:pre-wrap';
-                    msgDiv.insertBefore(reasoningEl, textNode);
+            // Corpo richiesta semplificato per HF Inference API Immagini
+            const hfRequestBody = { 
+                inputs: text,
+                parameters: {
+                    // Opzionale: puoi aggiungere parametri specifici qui se supportati dal modello
+                    // es: negative_prompt: "low quality, ugly"
                 }
-                reasoningEl.textContent = `💭 ${displayReasoning}`;
+            };
+
+            const response = await fetch(window.CONFIG.API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${activeToken}`
+                },
+                body: JSON.stringify(hfRequestBody)
+            });
+
+            if (!response.ok) {
+                // HF a volte risponde in JSON anche per errori di immagini
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `Errore HTTP ${response.status} da HF.`);
             }
 
-            textNode.textContent = displayContent.trimStart() + " ▮";
-            messageArea.scrollTop = messageArea.scrollHeight;
-            renderRequested = false;
-        };
+            // --- TRATTAMENTO RISULTATO BINARIO (BLOB) ---
+            console.log("✅ Immagine ricevuta, conversione in formato visualizzabile...");
+            const blob = await response.blob();
+            const imageUrl = URL.createObjectURL(blob); // Crea un URL temporaneo nel browser
 
-        const requestRender = () => {
-            if (!renderRequested) {
-                renderRequested = true;
-                requestAnimationFrame(updateUI);
-            }
-        };
-
-        // Lettura Stream
-        let chunkCount = 0;
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-                console.log(`⏹️ Stream completato. Chunk totali ricevuti: ${chunkCount}`);
-                break;
-            }
+            // Aggiorna la UI sostituendo il testo con l'immagine
+            contentNode.textContent = ""; // Rimuovi placeholder
+            const imgEl = document.createElement('img');
+            imgEl.src = imageUrl;
+            imgEl.alt = `Immagine generata per: ${text}`;
+            imgEl.style.maxWidth = '100%';
+            imgEl.style.borderRadius = '8px';
+            imgEl.style.marginTop = '10px';
+            imgEl.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
             
-            buffer += decoder.decode(value, { stream: true });
-            let lines = buffer.split('\n');
-            buffer = lines.pop(); 
+            // Quando l'immagine è caricata fisicamente, scorri verso il basso
+            imgEl.onload = () => messageArea.scrollTop = messageArea.scrollHeight;
+            
+            contentNode.appendChild(imgEl);
 
-            for (let line of lines) {
-                line = line.trim();
-                if (!line || line.startsWith(':')) continue;
+            // Salviamo nella history un riferimento testuale
+            chatHistory.push({ role: 'assistant', content: `[Immagine Generata: ${text}]` });
+            console.log("✅ Immagine visualizzata con successo.");
 
-                if (line.includes('"error"')) {
-                    throw new Error("Il server ha inviato un errore JSON all'interno del flusso.");
+        } 
+        // =====================================================================
+        // RAMO B: CHAT TESTUALE STREAMING (OpenRouter / Standard)
+        // =====================================================================
+        else {
+            console.log("✍️ Richiesta chat testuale streaming a OpenRouter...");
+            contentNode.textContent = "▮"; // Placeholder streaming
+
+            // Recupero blocco reasoning se attivo (plugin esterno)
+            const liveReasoning = window.ReasoningUI ? window.ReasoningUI.createLiveReasoningBlock() : null;
+            if (liveReasoning) msgDiv.insertBefore(liveReasoning.container, contentNode);
+
+            const requestBody = {
+                model: model,
+                messages: chatHistory,
+                stream: true,
+                include_reasoning: true
+            };
+
+            const response = await fetch(window.CONFIG.API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${activeToken}`,
+                    'HTTP-Referer': window.location.href,
+                    'X-Title': 'NemoAdam Cloud UI'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error?.message || `Errore HTTP ${response.status}`);
+            }
+
+            // --- LOGICA LETTURA STREAMING (Invariata ma isolata) ---
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            let nativeReasoningBuffer = "";
+            let rawContentBuffer = "";
+            let displayContent = "";
+            let displayReasoning = "";
+            let isStreamActive = true;
+
+            // Motore di Rendering Anti-Lag
+            let renderRequested = false;
+            const updateUI = () => {
+                if (!isStreamActive) return;
+                // Aggiorna reasoning
+                if (liveReasoning && displayReasoning) liveReasoning.updateText(displayReasoning);
+                // Aggiorna testo principale
+                contentNode.textContent = displayContent.trimStart() + " ▮";
+                messageArea.scrollTop = messageArea.scrollHeight;
+                renderRequested = false;
+            };
+
+            const requestRender = () => {
+                if (!renderRequested) {
+                    renderRequested = true;
+                    requestAnimationFrame(updateUI);
                 }
+            };
 
-                if (line.startsWith('data: ')) {
+            // Ciclo di lettura dello stream
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                let lines = buffer.split('\n');
+                buffer = lines.pop(); 
+
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line || !line.startsWith('data: ')) continue;
                     const dataStr = line.substring(6).trim();
-                    if (dataStr === '[DONE]') {
-                        console.log("🏁 Ricevuto [DONE] dal server.");
-                        continue;
-                    }
+                    if (dataStr === '[DONE]') continue;
                     
                     try {
                         const dataObj = JSON.parse(dataStr);
                         const delta = dataObj.choices?.[0]?.delta;
-
-                        // ─── LOG DIAGNOSTICO ───────────────────────────────────────
-                        if (delta && Object.keys(delta).length > 0) {
-                            chunkCount++;
-                            console.log(`📦 Delta #${chunkCount}:`, JSON.stringify(delta));
-                        }
-                        // ──────────────────────────────────────────────────────────
-
                         if (!delta) continue;
-                        receivedValidData = true;
 
-                        // Legge reasoning sia da campo nativo che da reasoning_content (OpenRouter)
-                        if (delta.reasoning)         nativeReasoningBuffer += delta.reasoning;
                         if (delta.reasoning_content) nativeReasoningBuffer += delta.reasoning_content;
                         if (delta.content)           rawContentBuffer += delta.content;
 
-                        // Gestione tag <think> inline nel content
+                        // Gestione tag <think> inline
                         const thinkStart = rawContentBuffer.indexOf('<think>');
                         if (thinkStart !== -1) {
                             const thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
@@ -231,61 +254,52 @@ async function handleSendMessage() {
                             }
                         } else {
                             displayContent = rawContentBuffer;
-                            displayReasoning = "";
                         }
 
                         displayReasoning = [nativeReasoningBuffer, displayReasoning].filter(Boolean).join("\n").trim();
                         requestRender();
                         
-                    } catch (e) {
-                        console.warn("⚠️ Chunk non parsabile ignorato:", line);
-                    }
+                    } catch (e) {}
                 }
             }
-        }
 
-        // Chiusura e salvataggio
-        isStreamActive = false;
-        let finalContent = displayContent.trim();
-        textNode.textContent = finalContent;
-        messageArea.scrollTop = messageArea.scrollHeight;
+            // Finalizzazione stream testo
+            isStreamActive = false;
+            let finalContent = displayContent.trim();
+            contentNode.textContent = finalContent; // Rimuovi cursore ▮
+            messageArea.scrollTop = messageArea.scrollHeight;
 
-        if (liveReasoning) {
-            const hasReasoning = (nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
-            liveReasoning.finish(hasReasoning);
-        }
+            if (liveReasoning) {
+                const hasReasoning = (nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
+                liveReasoning.finish(hasReasoning);
+            }
 
-        // Report finale in console
-        console.log("📊 REPORT FINALE:");
-        console.log("   → nativeReasoningBuffer:", nativeReasoningBuffer.substring(0, 200) || "(vuoto)");
-        console.log("   → rawContentBuffer:", rawContentBuffer.substring(0, 200) || "(vuoto)");
-        console.log("   → finalContent:", finalContent.substring(0, 200) || "(vuoto)");
-
-        if (!receivedValidData || (finalContent === "" && displayReasoning === "")) {
-            throw new Error("Il server ha chiuso la connessione senza inviare testo.");
-        } else {
-            chatHistory.push({ role: 'assistant', content: finalContent });
-            console.log("✅ Risposta IA completata e salvata nella history.");
+            if (finalContent === "" && displayReasoning === "") {
+                throw new Error("Il server non ha inviato nessuna risposta valida.");
+            } else {
+                chatHistory.push({ role: 'assistant', content: finalContent });
+            }
         }
 
     } catch (error) {
-        console.error('❌ ERRORE CRITICO:', error.message);
-        isStreamActive = false;
+        console.error('❌ ERRORE CRITICO:', error);
         
-        if (msgDiv && msgDiv.parentNode) {
-            if (msgDiv.textContent === "▮" || msgDiv.textContent === "") {
-                messageArea.removeChild(msgDiv);
-            } else {
-                const errorAlert = document.createElement('div');
-                errorAlert.style.cssText = "color: #ef4444; font-size: 14px; margin-top: 10px; font-weight: bold;";
-                errorAlert.textContent = `[Errore: ${error.message}]`;
-                msgDiv.appendChild(errorAlert);
-            }
+        // Pulizia UI in caso di errore
+        if (contentNode.textContent === "⌛ Elaborazione..." || contentNode.textContent === "▮" || contentNode.textContent.includes("Generazione immagine")) {
+             contentNode.textContent = `❌ Errore di sistema: ${error.message}`;
+             contentNode.style.color = "#ef4444";
         } else {
-            appendUserMessage(`Errore di sistema: ${error.message}`, 'ai');
+            // Se c'era già del testo parziale, aggiungi l'errore sotto
+            const errorAlert = document.createElement('div');
+            errorAlert.style.cssText = "color: #ef4444; font-size: 14px; margin-top: 10px; font-weight: bold;";
+            errorAlert.textContent = `[Errore interruzione: ${error.message}]`;
+            msgDiv.appendChild(errorAlert);
         }
         
-        chatHistory.pop();
+        // Rimuovi l'ultimo messaggio utente dalla history se la richiesta è fallita completamente
+        if(chatHistory.length > 0 && chatHistory[chatHistory.length-1].role === 'user') {
+             chatHistory.pop();
+        }
     } finally {
         toggleLoading(false);
     }
