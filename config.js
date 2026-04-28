@@ -1,36 +1,42 @@
-// config.js - Gestione configurazione e chiavi tramite LocalStorage
-
+/**
+ * config.js - Inizializzazione configurazione globale
+ */
 window.CONFIG = {
-    // Pesca le chiavi dal browser (se non ci sono, usa stringa vuota)
-    API_KEY:    localStorage.getItem('OPENROUTER_KEY') || "",
-    HF_API_KEY: localStorage.getItem('HUGGINGFACE_KEY') || "",
+    // Endpoints
+    OR_API_URL: 'https://openrouter.ai/api/v1/chat/completions',
+    HF_PROXY_URL: '/api/hf-proxy', // Il tuo proxy su Vercel
     
-    OR_API_URL: "https://openrouter.ai/api/v1/chat/completions",
-    API_URL:    "https://openrouter.ai/api/v1/chat/completions",
-    MODEL:      "nvidia/nemotron-3-super-120b-a12b:free",
-    PROVIDER:   "openrouter",
+    // Stato Iniziale (Default)
+    MODEL: 'google/gemini-2.0-flash-001', 
+    PROVIDER: 'openrouter',
     
-    // Questa variabile servirà per scambiare la chiave in base al modello scelto
-    _activeKey: localStorage.getItem('OPENROUTER_KEY') || "" 
+    // Chiave OpenRouter (dal localStorage)
+    API_KEY: localStorage.getItem('OPENROUTER_API_KEY') || '',
+    _activeKey: localStorage.getItem('OPENROUTER_API_KEY') || ''
 };
 
-// Funzione chiamata dal bottone HTML per salvare le chiavi
-function salvaChiavi() {
-    const orKey = document.getElementById('input-or-key').value.trim();
-    const hfKey = document.getElementById('input-hf-key').value.trim();
-    
-    if(orKey) localStorage.setItem('OPENROUTER_KEY', orKey);
-    if(hfKey) localStorage.setItem('HUGGINGFACE_KEY', hfKey);
-    
-    alert("✅ Chiavi salvate in modo sicuro nel tuo browser!");
-    location.reload(); // Ricarica per applicare le chiavi
-}
+/**
+ * Funzione per salvare solo la chiave OpenRouter
+ */
+window.salvaChiavi = function() {
+    const orInput = document.getElementById('input-or-key');
+    const orKey = orInput ? orInput.value.trim() : "";
 
-// All'avvio, se le chiavi sono già salvate, le mostra oscurate negli input
-window.addEventListener('DOMContentLoaded', () => {
-    const savedOrKey = localStorage.getItem('OPENROUTER_KEY');
-    const savedHfKey = localStorage.getItem('HUGGINGFACE_KEY');
-    
-    if (savedOrKey) document.getElementById('input-or-key').value = savedOrKey;
-    if (savedHfKey) document.getElementById('input-hf-key').value = savedHfKey;
+    if (orKey) {
+        localStorage.setItem('OPENROUTER_API_KEY', orKey);
+        window.CONFIG.API_KEY = orKey;
+        window.CONFIG._activeKey = orKey;
+        alert('✅ Chiave OpenRouter salvata! Ricarico la pagina...');
+        location.reload();
+    } else {
+        alert('⚠️ Inserisci una chiave OpenRouter valida.');
+    }
+};
+
+// Pre-popola l'input all'avvio
+document.addEventListener('DOMContentLoaded', () => {
+    const orInput = document.getElementById('input-or-key');
+    if (orInput && window.CONFIG.API_KEY) {
+        orInput.value = window.CONFIG.API_KEY;
+    }
 });
