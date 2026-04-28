@@ -8,7 +8,7 @@ const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 
-console.log("⚙️ script.js caricato correttamente (Supporto Immagini attivo).");
+console.log("⚙️ script.js caricato correttamente (Supporto Immagini attivo via Proxy).");
 
 // Inizializzazione UI
 if (!sendBtn || !userInput || !messageArea) {
@@ -72,8 +72,9 @@ async function handleSendMessage() {
     const activeToken = window.CONFIG._activeKey || window.CONFIG.API_KEY;
     const model = window.CONFIG.MODEL;
 
-    if (!activeToken) {
-        contentNode.textContent = "⚠️ Chiave API mancante nelle impostazioni (⚙️).";
+    // Controllo token: NON richiesto lato client se usiamo il proxy per HuggingFace
+    if (!activeToken && provider !== 'huggingface') {
+        contentNode.textContent = "⚠️ Chiave API testuale mancante nelle impostazioni (⚙️).";
         toggleLoading(false);
         return;
     }
@@ -82,23 +83,22 @@ async function handleSendMessage() {
 
     try {
         // =====================================================================
-        // RAMO A: GENERAZIONE IMMAGINI (HuggingFace via Proxy Vercel)
+        // RAMO A: GENERAZIONE IMMAGINI (HuggingFace via Proxy Vercel locale)
         // =====================================================================
         if (provider === 'huggingface') {
-            console.log("🎨 Richiesta generazione immagine tramite proxy /api/hf-proxy...");
+            console.log("🎨 Richiesta generazione immagine tramite proxy locale /api/hf-proxy...");
             contentNode.textContent = "🎨 Generazione immagine in corso (potrebbe volerci un minuto)...▮";
 
             const hfRequestBody = { inputs: text };
 
-            // Il proxy Vercel gestisce la chiave HF lato server — nessun Authorization qui
-            const response = await fetch(window.CONFIG.API_URL, {
+            // ⚠️ Chiamiamo forzatamente l'endpoint del proxy locale!
+            const response = await fetch('/api/hf-proxy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(hfRequestBody)
             });
 
             if (!response.ok) {
-                // Il proxy può restituire JSON con dettaglio errore
                 const errText = await response.text();
                 let errMsg = `Errore HTTP ${response.status}`;
                 try {
@@ -112,11 +112,9 @@ async function handleSendMessage() {
             console.log("📦 Content-Type ricevuto:", contentType);
 
             if (contentType.includes('application/json')) {
-                // Alcuni modelli restituiscono URL o base64 in JSON
                 const json = await response.json();
                 console.log("📦 Risposta JSON HF:", json);
 
-                // Caso array di oggetti con .url o .image
                 const imgSrc = json?.[0]?.url || json?.[0]?.image || json?.url || json?.image;
                 if (imgSrc) {
                     renderImage(imgSrc, text, contentNode);
@@ -124,7 +122,6 @@ async function handleSendMessage() {
                     contentNode.textContent = "⚠️ Risposta non riconosciuta: " + JSON.stringify(json).substring(0, 200);
                 }
             } else {
-                // Risposta binaria diretta (image/png, image/jpeg, ecc.)
                 console.log("✅ Immagine binaria ricevuta, conversione in blob...");
                 const blob = await response.blob();
                 const imageUrl = URL.createObjectURL(blob);
