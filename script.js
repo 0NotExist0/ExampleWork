@@ -25,9 +25,6 @@ if (!sendBtn || !userInput || !messageArea) {
     console.log("✅ Event listeners collegati con successo.");
 }
 
-/**
- * Utility grafica per aggiungere messaggi dell'utente
- */
 function appendUserMessage(content, sender = 'user') {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', sender);
@@ -36,50 +33,35 @@ function appendUserMessage(content, sender = 'user') {
     messageArea.scrollTop = messageArea.scrollHeight;
 }
 
-/**
- * Utility per bloccare/sbloccare l'input durante il caricamento
- */
 function toggleLoading(isLoading) {
     userInput.disabled = isLoading;
     sendBtn.disabled = isLoading;
-    if (!isLoading) {
-        userInput.focus();
-    }
+    if (!isLoading) userInput.focus();
 }
 
-/**
- * Gestore principale dell'invio messaggi
- */
 async function handleSendMessage() {
     console.log("▶️ Tentativo di invio messaggio...");
-    
     if (sendBtn.disabled) return;
 
     const text = userInput.value.trim();
     if (!text) return;
 
-    // Aggiungi messaggio utente e pulisci input
     appendUserMessage(text);
     userInput.value = '';
     chatHistory.push({ role: 'user', content: text });
-    
     toggleLoading(true);
 
-    // Preparazione area messaggio IA (vuota con indicatore di caricamento)
+    // Area messaggio IA
     let msgDiv = document.createElement('div');
     msgDiv.classList.add('message', 'ai');
-    
-    // Contenitore per il testo o l'immagine finale
     const contentNode = document.createElement('div');
-    contentNode.style.whiteSpace = "pre-wrap"; 
-    contentNode.style.wordBreak = "break-word"; 
-    contentNode.textContent = "⌛ Elaborazione..."; // Placeholder iniziale
+    contentNode.style.whiteSpace = "pre-wrap";
+    contentNode.style.wordBreak = "break-word";
+    contentNode.textContent = "⌛ Elaborazione...";
     msgDiv.appendChild(contentNode);
-    
     messageArea.appendChild(msgDiv);
     messageArea.scrollTop = messageArea.scrollHeight;
 
-    // Recupero configurazione
     if (typeof window.CONFIG === 'undefined') {
         contentNode.textContent = "❌ Errore: CONFIG non definito.";
         toggleLoading(false);
@@ -100,69 +82,66 @@ async function handleSendMessage() {
 
     try {
         // =====================================================================
-        // RAMO A: GENERAZIONE IMMAGINI (Hugging Face)
+        // RAMO A: GENERAZIONE IMMAGINI (HuggingFace via Proxy Vercel)
         // =====================================================================
         if (provider === 'huggingface') {
-            console.log("🎨 Richiesta generazione immagine a Hugging Face...");
+            console.log("🎨 Richiesta generazione immagine tramite proxy /api/hf-proxy...");
             contentNode.textContent = "🎨 Generazione immagine in corso (potrebbe volerci un minuto)...▮";
 
-            // Corpo richiesta semplificato per HF Inference API Immagini
-            const hfRequestBody = { 
-                inputs: text,
-                parameters: {
-                    // Opzionale: puoi aggiungere parametri specifici qui se supportati dal modello
-                    // es: negative_prompt: "low quality, ugly"
-                }
-            };
+            const hfRequestBody = { inputs: text };
 
+            // Il proxy Vercel gestisce la chiave HF lato server — nessun Authorization qui
             const response = await fetch(window.CONFIG.API_URL, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${activeToken}`
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(hfRequestBody)
             });
 
             if (!response.ok) {
-                // HF a volte risponde in JSON anche per errori di immagini
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `Errore HTTP ${response.status} da HF.`);
+                // Il proxy può restituire JSON con dettaglio errore
+                const errText = await response.text();
+                let errMsg = `Errore HTTP ${response.status}`;
+                try {
+                    const errJson = JSON.parse(errText);
+                    errMsg = errJson.error || errMsg;
+                } catch (_) { errMsg = errText || errMsg; }
+                throw new Error(errMsg);
             }
 
-            // --- TRATTAMENTO RISULTATO BINARIO (BLOB) ---
-            console.log("✅ Immagine ricevuta, conversione in formato visualizzabile...");
-            const blob = await response.blob();
-            const imageUrl = URL.createObjectURL(blob); // Crea un URL temporaneo nel browser
+            const contentType = response.headers.get('content-type') || '';
+            console.log("📦 Content-Type ricevuto:", contentType);
 
-            // Aggiorna la UI sostituendo il testo con l'immagine
-            contentNode.textContent = ""; // Rimuovi placeholder
-            const imgEl = document.createElement('img');
-            imgEl.src = imageUrl;
-            imgEl.alt = `Immagine generata per: ${text}`;
-            imgEl.style.maxWidth = '100%';
-            imgEl.style.borderRadius = '8px';
-            imgEl.style.marginTop = '10px';
-            imgEl.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-            
-            // Quando l'immagine è caricata fisicamente, scorri verso il basso
-            imgEl.onload = () => messageArea.scrollTop = messageArea.scrollHeight;
-            
-            contentNode.appendChild(imgEl);
+            if (contentType.includes('application/json')) {
+                // Alcuni modelli restituiscono URL o base64 in JSON
+                const json = await response.json();
+                console.log("📦 Risposta JSON HF:", json);
 
-            // Salviamo nella history un riferimento testuale
+                // Caso array di oggetti con .url o .image
+                const imgSrc = json?.[0]?.url || json?.[0]?.image || json?.url || json?.image;
+                if (imgSrc) {
+                    renderImage(imgSrc, text, contentNode);
+                } else {
+                    contentNode.textContent = "⚠️ Risposta non riconosciuta: " + JSON.stringify(json).substring(0, 200);
+                }
+            } else {
+                // Risposta binaria diretta (image/png, image/jpeg, ecc.)
+                console.log("✅ Immagine binaria ricevuta, conversione in blob...");
+                const blob = await response.blob();
+                const imageUrl = URL.createObjectURL(blob);
+                renderImage(imageUrl, text, contentNode);
+            }
+
             chatHistory.push({ role: 'assistant', content: `[Immagine Generata: ${text}]` });
             console.log("✅ Immagine visualizzata con successo.");
+        }
 
-        } 
         // =====================================================================
         // RAMO B: CHAT TESTUALE STREAMING (OpenRouter / Standard)
         // =====================================================================
         else {
-            console.log("✍️ Richiesta chat testuale streaming a OpenRouter...");
-            contentNode.textContent = "▮"; // Placeholder streaming
+            console.log("✍️ Richiesta chat testuale streaming...");
+            contentNode.textContent = "▮";
 
-            // Recupero blocco reasoning se attivo (plugin esterno)
             const liveReasoning = window.ReasoningUI ? window.ReasoningUI.createLiveReasoningBlock() : null;
             if (liveReasoning) msgDiv.insertBefore(liveReasoning.container, contentNode);
 
@@ -189,7 +168,6 @@ async function handleSendMessage() {
                 throw new Error(errorData.error?.message || `Errore HTTP ${response.status}`);
             }
 
-            // --- LOGICA LETTURA STREAMING (Invariata ma isolata) ---
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
             let buffer = "";
@@ -199,49 +177,37 @@ async function handleSendMessage() {
             let displayReasoning = "";
             let isStreamActive = true;
 
-            // Motore di Rendering Anti-Lag
             let renderRequested = false;
             const updateUI = () => {
                 if (!isStreamActive) return;
-                // Aggiorna reasoning
                 if (liveReasoning && displayReasoning) liveReasoning.updateText(displayReasoning);
-                // Aggiorna testo principale
                 contentNode.textContent = displayContent.trimStart() + " ▮";
                 messageArea.scrollTop = messageArea.scrollHeight;
                 renderRequested = false;
             };
-
             const requestRender = () => {
-                if (!renderRequested) {
-                    renderRequested = true;
-                    requestAnimationFrame(updateUI);
-                }
+                if (!renderRequested) { renderRequested = true; requestAnimationFrame(updateUI); }
             };
 
-            // Ciclo di lettura dello stream
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                
                 buffer += decoder.decode(value, { stream: true });
                 let lines = buffer.split('\n');
-                buffer = lines.pop(); 
+                buffer = lines.pop();
 
                 for (let line of lines) {
                     line = line.trim();
                     if (!line || !line.startsWith('data: ')) continue;
                     const dataStr = line.substring(6).trim();
                     if (dataStr === '[DONE]') continue;
-                    
                     try {
                         const dataObj = JSON.parse(dataStr);
                         const delta = dataObj.choices?.[0]?.delta;
                         if (!delta) continue;
-
                         if (delta.reasoning_content) nativeReasoningBuffer += delta.reasoning_content;
-                        if (delta.content)           rawContentBuffer += delta.content;
+                        if (delta.content) rawContentBuffer += delta.content;
 
-                        // Gestione tag <think> inline
                         const thinkStart = rawContentBuffer.indexOf('<think>');
                         if (thinkStart !== -1) {
                             const thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
@@ -255,23 +221,19 @@ async function handleSendMessage() {
                         } else {
                             displayContent = rawContentBuffer;
                         }
-
                         displayReasoning = [nativeReasoningBuffer, displayReasoning].filter(Boolean).join("\n").trim();
                         requestRender();
-                        
                     } catch (e) {}
                 }
             }
 
-            // Finalizzazione stream testo
             isStreamActive = false;
             let finalContent = displayContent.trim();
-            contentNode.textContent = finalContent; // Rimuovi cursore ▮
+            contentNode.textContent = finalContent;
             messageArea.scrollTop = messageArea.scrollHeight;
 
             if (liveReasoning) {
-                const hasReasoning = (nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
-                liveReasoning.finish(hasReasoning);
+                liveReasoning.finish(nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
             }
 
             if (finalContent === "" && displayReasoning === "") {
@@ -283,24 +245,34 @@ async function handleSendMessage() {
 
     } catch (error) {
         console.error('❌ ERRORE CRITICO:', error);
-        
-        // Pulizia UI in caso di errore
-        if (contentNode.textContent === "⌛ Elaborazione..." || contentNode.textContent === "▮" || contentNode.textContent.includes("Generazione immagine")) {
-             contentNode.textContent = `❌ Errore di sistema: ${error.message}`;
-             contentNode.style.color = "#ef4444";
+        const wasEmpty = ["⌛ Elaborazione...", "▮"].some(s => contentNode.textContent === s)
+            || contentNode.textContent.includes("Generazione immagine");
+
+        if (wasEmpty) {
+            contentNode.textContent = `❌ Errore di sistema: ${error.message}`;
+            contentNode.style.color = "#ef4444";
         } else {
-            // Se c'era già del testo parziale, aggiungi l'errore sotto
             const errorAlert = document.createElement('div');
             errorAlert.style.cssText = "color: #ef4444; font-size: 14px; margin-top: 10px; font-weight: bold;";
             errorAlert.textContent = `[Errore interruzione: ${error.message}]`;
             msgDiv.appendChild(errorAlert);
         }
-        
-        // Rimuovi l'ultimo messaggio utente dalla history se la richiesta è fallita completamente
-        if(chatHistory.length > 0 && chatHistory[chatHistory.length-1].role === 'user') {
-             chatHistory.pop();
+        if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') {
+            chatHistory.pop();
         }
     } finally {
         toggleLoading(false);
     }
+}
+
+// ── Helper: mostra immagine nel chat ──────────────────────────────────────────
+function renderImage(src, prompt, container) {
+    container.textContent = "";
+    const imgEl = document.createElement('img');
+    imgEl.src = src;
+    imgEl.alt = `Immagine generata: ${prompt}`;
+    imgEl.style.cssText = "max-width:100%;border-radius:8px;margin-top:10px;box-shadow:0 4px 6px rgba(0,0,0,0.3);";
+    imgEl.onload = () => messageArea.scrollTop = messageArea.scrollHeight;
+    imgEl.onerror = () => { container.textContent = "⚠️ Immagine ricevuta ma non visualizzabile. Src: " + src.substring(0, 80); };
+    container.appendChild(imgEl);
 }
