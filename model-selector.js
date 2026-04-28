@@ -6,31 +6,101 @@
 if (!window.__modelSelectorLoaded) {
     window.__modelSelectorLoaded = true;
 
-    // ─── Modelli HuggingFace curati (gratuiti via Inference API) ─────────────
+    // ─── Modelli HuggingFace — separati per tier ──────────────────────────────
     const HF_MODELS = {
-        "🎨 Genera Immagini": [
-            { id: "black-forest-labs/FLUX.1-schnell",          name: "FLUX.1 Schnell (veloce)" },
-            { id: "black-forest-labs/FLUX.1-dev",              name: "FLUX.1 Dev (qualità)" },
-            { id: "stabilityai/stable-diffusion-xl-base-1.0",  name: "Stable Diffusion XL" },
-            { id: "stabilityai/stable-diffusion-3.5-large",    name: "Stable Diffusion 3.5 Large" },
-            { id: "stabilityai/stable-diffusion-3-medium-diffusers", name: "Stable Diffusion 3 Medium" },
-            { id: "Shakker-Labs/FLUX.1-dev-LoRA-AntiBlur",     name: "FLUX AntiBlur" },
-            { id: "enhanceaiteam/Flux-Uncensored-V2",          name: "FLUX Uncensored V2" },
-        ],
-        "🎬 Genera Video": [
-            { id: "ali-vilab/text-to-video-ms-1.7b",           name: "Text-to-Video MS 1.7B" },
-            { id: "stabilityai/stable-video-diffusion-img2vid-xt", name: "Stable Video Diffusion XT" },
-            { id: "genmo/mochi-1-preview",                     name: "Mochi 1 Preview" },
-            { id: "Wan-AI/Wan2.1-T2V-14B-Diffusers",           name: "Wan2.1 T2V 14B" },
-            { id: "tencent/HunyuanVideo",                      name: "HunyuanVideo" },
-            { id: "Lightricks/LTX-Video",                      name: "LTX Video" },
-        ]
+        "🎨 Genera Immagini": {
+            free: [
+                { id: "black-forest-labs/FLUX.1-schnell",         name: "FLUX.1 Schnell (veloce)" },
+                { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "Stable Diffusion XL" },
+                { id: "enhanceaiteam/Flux-Uncensored-V2",         name: "FLUX Uncensored V2" },
+            ],
+            pro: [
+                { id: "black-forest-labs/FLUX.1-dev",                    name: "FLUX.1 Dev (qualità)" },
+                { id: "stabilityai/stable-diffusion-3.5-large",          name: "Stable Diffusion 3.5 Large" },
+                { id: "stabilityai/stable-diffusion-3-medium-diffusers", name: "Stable Diffusion 3 Medium" },
+                { id: "Shakker-Labs/FLUX.1-dev-LoRA-AntiBlur",           name: "FLUX AntiBlur" },
+            ],
+        },
+        "🎬 Genera Video": {
+            free: [
+                { id: "ali-vilab/text-to-video-ms-1.7b", name: "Text-to-Video MS 1.7B" },
+                { id: "genmo/mochi-1-preview",            name: "Mochi 1 Preview" },
+                { id: "Lightricks/LTX-Video",             name: "LTX Video" },
+            ],
+            pro: [
+                { id: "stabilityai/stable-video-diffusion-img2vid-xt", name: "Stable Video Diffusion XT" },
+                { id: "Wan-AI/Wan2.1-T2V-14B-Diffusers",              name: "Wan2.1 T2V 14B" },
+                { id: "tencent/HunyuanVideo",                         name: "HunyuanVideo" },
+            ],
+        }
     };
+
+    // Flat list per ricerca e preferiti
+    function allHfModels() {
+        const out = [];
+        for (const cat of Object.values(HF_MODELS)) {
+            cat.free.forEach(m => out.push({ ...m, _hfTier: 'free' }));
+            cat.pro.forEach(m => out.push({ ...m, _hfTier: 'pro' }));
+        }
+        return out;
+    }
     // ─────────────────────────────────────────────────────────────────────────
 
     async function initModelSelector() {
         const header = document.querySelector('header');
         if (!header || document.getElementById('model-menu-root')) return;
+
+        // Stili badge tier
+        const styleTag = document.createElement('style');
+        styleTag.textContent = `
+            .hf-badge-free {
+                font-size: 9px;
+                background: #065f46;
+                color: #6ee7b7;
+                padding: 1px 5px;
+                border-radius: 3px;
+                margin-left: 4px;
+                font-weight: bold;
+                letter-spacing: 0.3px;
+            }
+            .hf-badge-pro {
+                font-size: 9px;
+                background: #78350f;
+                color: #fcd34d;
+                padding: 1px 5px;
+                border-radius: 3px;
+                margin-left: 4px;
+                font-weight: bold;
+                letter-spacing: 0.3px;
+            }
+            .tier-header-free {
+                padding: 4px 12px 2px;
+                font-size: 10px;
+                color: #6ee7b7;
+                font-weight: bold;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                border-top: 1px solid #1f4037;
+                margin-top: 4px;
+            }
+            .tier-header-pro {
+                padding: 4px 12px 2px;
+                font-size: 10px;
+                color: #fcd34d;
+                font-weight: bold;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                border-top: 1px solid #44200a;
+                margin-top: 4px;
+            }
+            .tier-pro-warning {
+                padding: 2px 12px 6px;
+                font-size: 10px;
+                color: #9ca3af;
+                font-style: italic;
+            }
+        `;
+        document.head.appendChild(styleTag);
 
         // ── Root container ──
         const rootContainer = document.createElement('div');
@@ -87,8 +157,6 @@ if (!window.__modelSelectorLoaded) {
                 style="width:100%;padding:6px 10px;border-radius:4px;border:1px solid #4b5563;background:#1f2937;color:white;font-size:13px;outline:none;box-sizing:border-box;">`;
             mainSubmenu.appendChild(searchWrap);
 
-            const searchInput = searchWrap.querySelector('#model-search-input');
-
             const searchResults = document.createElement('div');
             searchResults.style.display = 'none';
             mainSubmenu.appendChild(searchResults);
@@ -96,7 +164,9 @@ if (!window.__modelSelectorLoaded) {
             const treeContainer = document.createElement('div');
             mainSubmenu.appendChild(treeContainer);
 
-            // Filtraggio live (OpenRouter + HF insieme)
+            const searchInput = searchWrap.querySelector('#model-search-input');
+
+            // Filtraggio live
             searchInput.addEventListener('input', e => {
                 const q = e.target.value.toLowerCase().trim();
                 if (!q) {
@@ -110,15 +180,14 @@ if (!window.__modelSelectorLoaded) {
                 searchResults.innerHTML = '';
 
                 // OpenRouter
-                const orHits = allOpenRouterModels.filter(m =>
-                    m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
-                );
-                orHits.forEach(m => createModelLeaf(m, 'openrouter', searchResults, () => renderFavLeaves(favSub)));
+                allOpenRouterModels
+                    .filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
+                    .forEach(m => createModelLeaf(m, 'openrouter', null, searchResults, () => renderFavLeaves(favSub)));
 
-                // HuggingFace
-                Object.values(HF_MODELS).flat().filter(m =>
-                    m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
-                ).forEach(m => createModelLeaf(m, 'huggingface', searchResults, () => renderFavLeaves(favSub)));
+                // HuggingFace (free + pro)
+                allHfModels()
+                    .filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))
+                    .forEach(m => createModelLeaf(m, 'huggingface', m._hfTier, searchResults, () => renderFavLeaves(favSub)));
 
                 if (searchResults.children.length === 0)
                     searchResults.innerHTML = '<div class="model-leaf" style="font-style:italic;opacity:.5;padding:8px 12px;">Nessun risultato trovato...</div>';
@@ -140,7 +209,6 @@ if (!window.__modelSelectorLoaded) {
         }
 
         // ════════════════════════════════════════════════════════════════════
-        // OpenRouter: gerarchia GRATIS / PREMIUM → Standard/Reasoning/Visione/Generazione
         function buildOpenRouterTree(parent, favSub) {
             const tree = {
                 "🟢 GRATIS":   { "Standard": [], "Reasoning": [], "👁️ Visione": [], "🎨 Genera Immagini": [] },
@@ -163,13 +231,13 @@ if (!window.__modelSelectorLoaded) {
                 tree[branch][leaf].push(m);
             });
 
-            const orSection = createFolderNode("🔀 OpenRouter", parent);
+            createFolderNode("🔀 OpenRouter", parent);
             const orSub = document.createElement('div');
             orSub.className = 'submenu';
             parent.appendChild(orSub);
 
             for (const branch in tree) {
-                const bBtn = createFolderNode(branch, orSub);
+                createFolderNode(branch, orSub);
                 const bSub = document.createElement('div');
                 bSub.className = 'submenu';
                 orSub.appendChild(bSub);
@@ -180,34 +248,59 @@ if (!window.__modelSelectorLoaded) {
                     const lSub = document.createElement('div');
                     lSub.className = 'submenu';
                     bSub.appendChild(lSub);
-                    tree[branch][leaf].forEach(m => createModelLeaf(m, 'openrouter', lSub, () => renderFavLeaves(favSub)));
+                    tree[branch][leaf].forEach(m => createModelLeaf(m, 'openrouter', null, lSub, () => renderFavLeaves(favSub)));
                 }
             }
         }
 
         // ════════════════════════════════════════════════════════════════════
-        // HuggingFace: sezione separata con categorie curate
+        // HuggingFace: sezione con tier FREE / PRO separati per categoria
         function buildHuggingFaceTree(parent, favSub) {
-            const hfBtn = createFolderNode("🤗 HuggingFace (Gratuito)", parent);
+            createFolderNode("🤗 HuggingFace", parent);
             const hfSub = document.createElement('div');
             hfSub.className = 'submenu';
             parent.appendChild(hfSub);
 
-            // Nota informativa
+            // Nota chiave API
             const note = document.createElement('div');
             note.style.cssText = 'padding:6px 12px;font-size:11px;color:#9ca3af;border-bottom:1px solid #374151;';
-            note.textContent = '⚠️ Richiede HF_API_KEY in CONFIG. Output: URL immagine/video.';
+            note.textContent = '⚠️ Richiede HF_API_KEY in CONFIG.';
             hfSub.appendChild(note);
 
-            for (const category in HF_MODELS) {
+            for (const [category, tiers] of Object.entries(HF_MODELS)) {
+                // Cartella categoria (es. "🎨 Genera Immagini")
                 createFolderNode(category, hfSub);
                 const catSub = document.createElement('div');
                 catSub.className = 'submenu';
                 hfSub.appendChild(catSub);
 
-                HF_MODELS[category].forEach(m => {
-                    createModelLeaf(m, 'huggingface', catSub, () => renderFavLeaves(favSub));
-                });
+                // ── Tier GRATUITO ──
+                if (tiers.free.length > 0) {
+                    const freeHeader = document.createElement('div');
+                    freeHeader.className = 'tier-header-free';
+                    freeHeader.textContent = '✅ Gratuito (Inference API)';
+                    catSub.appendChild(freeHeader);
+                    tiers.free.forEach(m =>
+                        createModelLeaf(m, 'huggingface', 'free', catSub, () => renderFavLeaves(favSub))
+                    );
+                }
+
+                // ── Tier PRO ──
+                if (tiers.pro.length > 0) {
+                    const proHeader = document.createElement('div');
+                    proHeader.className = 'tier-header-pro';
+                    proHeader.textContent = '🔒 Richiede HF Pro';
+                    catSub.appendChild(proHeader);
+
+                    const proWarn = document.createElement('div');
+                    proWarn.className = 'tier-pro-warning';
+                    proWarn.textContent = 'Abbonamento a pagamento o modello gated (licenza da accettare su HF)';
+                    catSub.appendChild(proWarn);
+
+                    tiers.pro.forEach(m =>
+                        createModelLeaf(m, 'huggingface', 'pro', catSub, () => renderFavLeaves(favSub))
+                    );
+                }
             }
         }
 
@@ -226,16 +319,23 @@ if (!window.__modelSelectorLoaded) {
         /**
          * @param {object} model    { id, name }
          * @param {string} provider 'openrouter' | 'huggingface'
+         * @param {string|null} hfTier  'free' | 'pro' | null
          * @param {Element} parent
          * @param {Function} onFavChange
          */
-        function createModelLeaf(model, provider, parent, onFavChange) {
+        function createModelLeaf(model, provider, hfTier, parent, onFavChange) {
             const leaf = document.createElement('div');
             leaf.className = 'menu-item model-leaf';
             const isFav = favoriteIds.includes(model.id);
-            const badge = provider === 'huggingface'
-                ? '<span style="font-size:10px;background:#7c3aed;color:white;padding:1px 5px;border-radius:3px;margin-left:4px;">HF</span>'
-                : '';
+
+            let badge = '';
+            if (provider === 'huggingface') {
+                if (hfTier === 'pro') {
+                    badge = '<span class="hf-badge-pro">HF PRO</span>';
+                } else {
+                    badge = '<span class="hf-badge-free">HF FREE</span>';
+                }
+            }
 
             leaf.innerHTML = `
                 <span class="model-name" title="${model.id}">${model.name}${badge}</span>
@@ -248,20 +348,21 @@ if (!window.__modelSelectorLoaded) {
                     window.CONFIG.MODEL    = model.id;
                     window.CONFIG.PROVIDER = provider;
 
-                    // Imposta l'endpoint corretto automaticamente
                     if (provider === 'huggingface') {
                         window.CONFIG.API_URL = `https://api-inference.huggingface.co/models/${model.id}`;
-                        // Usa HF_API_KEY se disponibile, altrimenti rimane invariata
                         if (window.CONFIG.HF_API_KEY) {
                             window.CONFIG._activeKey = window.CONFIG.HF_API_KEY;
                         }
+                        // Avviso se si seleziona un modello Pro
+                        if (hfTier === 'pro') {
+                            console.warn(`⚠️ [HF Pro] "${model.name}" richiede un abbonamento HF Pro attivo e l'accettazione della licenza su huggingface.co`);
+                        }
                     } else {
-                        // Ripristina OpenRouter
-                        window.CONFIG.API_URL = window.CONFIG.OR_API_URL || 'https://openrouter.ai/api/v1/chat/completions';
+                        window.CONFIG.API_URL    = window.CONFIG.OR_API_URL || 'https://openrouter.ai/api/v1/chat/completions';
                         window.CONFIG._activeKey = window.CONFIG.API_KEY;
                     }
 
-                    updateGlobalUI(model.id, provider);
+                    updateGlobalUI(model.id, provider, hfTier);
                 }
                 document.querySelector('#model-menu-root .menu-item')?.classList.remove('open');
             };
@@ -282,13 +383,13 @@ if (!window.__modelSelectorLoaded) {
                 container.innerHTML = '<div class="model-leaf" style="font-style:italic;opacity:.5;padding:8px 12px;">Nessun preferito...</div>';
                 return;
             }
+            const flatHf = allHfModels();
             favoriteIds.forEach(id => {
-                // Cerca prima in OpenRouter, poi in HF
                 const orModel = allOpenRouterModels.find(m => m.id === id);
-                const hfModel = Object.values(HF_MODELS).flat().find(m => m.id === id);
-                if (orModel) createModelLeaf(orModel, 'openrouter', container, () => renderFavLeaves(container));
-                else if (hfModel) createModelLeaf(hfModel, 'huggingface', container, () => renderFavLeaves(container));
-                else createModelLeaf({ id, name: id }, 'openrouter', container, () => renderFavLeaves(container));
+                const hfModel = flatHf.find(m => m.id === id);
+                if (orModel) createModelLeaf(orModel, 'openrouter', null, container, () => renderFavLeaves(container));
+                else if (hfModel) createModelLeaf(hfModel, 'huggingface', hfModel._hfTier, container, () => renderFavLeaves(container));
+                else createModelLeaf({ id, name: id }, 'openrouter', null, container, () => renderFavLeaves(container));
             });
         }
 
@@ -300,11 +401,14 @@ if (!window.__modelSelectorLoaded) {
             localStorage.setItem('nemotron_favorites', JSON.stringify(favoriteIds));
         }
 
-        function updateGlobalUI(modelId, provider = 'openrouter') {
+        function updateGlobalUI(modelId, provider = 'openrouter', hfTier = null) {
             const tag  = document.getElementById('active-model-name');
             const stat = document.querySelector('.status-indicator');
             const short = modelId.split('/').pop();
-            const prefix = provider === 'huggingface' ? '🤗 ' : '';
+            let prefix = '';
+            if (provider === 'huggingface') {
+                prefix = hfTier === 'pro' ? '🔒 ' : '🤗 ';
+            }
             if (tag)  tag.innerText = prefix + short;
             if (stat) stat.innerHTML = `Online - <span style="color:#60a5fa">${prefix}${short}</span>`;
         }
