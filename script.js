@@ -80,7 +80,10 @@ async function handleSendMessage() {
 
     try {
         if (typeof window.CONFIG === 'undefined') throw new Error("window.CONFIG non è definito.");
-        if (!window.CONFIG.API_KEY) throw new Error("API_KEY mancante nella configurazione.");
+        
+        // Permettiamo l'uso se c'è almeno una chiave (OpenRouter o HF) in base al provider attivo
+        const activeToken = window.CONFIG._activeKey || window.CONFIG.API_KEY;
+        if (!activeToken) throw new Error("Chiave API mancante. Inseriscila nelle impostazioni (⚙️).");
         if (!window.CONFIG.MODEL) throw new Error("MODEL mancante nella configurazione.");
 
         console.log(`📡 Contattando API per il modello: ${window.CONFIG.MODEL}...`);
@@ -96,7 +99,8 @@ async function handleSendMessage() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${window.CONFIG.API_KEY}`,
+                // Qui è dove avviene la magia: usa la chiave attiva dinamica
+                'Authorization': `Bearer ${activeToken}`,
                 'HTTP-Referer': window.location.href,
                 'X-Title': 'Nemotron Web UI'
             },
@@ -200,8 +204,6 @@ async function handleSendMessage() {
                         const delta = dataObj.choices?.[0]?.delta;
 
                         // ─── LOG DIAGNOSTICO ───────────────────────────────────────
-                        // Mostra ogni delta ricevuto per capire la struttura di OpenRouter.
-                        // Rimuovi questo blocco una volta che il reasoning funziona.
                         if (delta && Object.keys(delta).length > 0) {
                             chunkCount++;
                             console.log(`📦 Delta #${chunkCount}:`, JSON.stringify(delta));
@@ -276,7 +278,7 @@ async function handleSendMessage() {
             } else {
                 const errorAlert = document.createElement('div');
                 errorAlert.style.cssText = "color: #ef4444; font-size: 14px; margin-top: 10px; font-weight: bold;";
-                errorAlert.textContent = `[Errore di Rete: ${error.message}]`;
+                errorAlert.textContent = `[Errore: ${error.message}]`;
                 msgDiv.appendChild(errorAlert);
             }
         } else {
