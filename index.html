@@ -12,8 +12,19 @@
             <h1>NemoAdam Cloud</h1>
             <div class="status-indicator">Online</div>
         </header>
-        <div id="messages" class="message-area">
+
+        <details style="background: #1e1e1e; color: #fff; padding: 10px; border-bottom: 1px solid #333; cursor: pointer;">
+            <summary style="font-weight: bold; font-size: 14px;">⚙️ Impostazioni Chiavi API (Locale)</summary>
+            <div style="margin-top: 15px; cursor: default;">
+                <p style="font-size: 12px; color: #aaa; margin-bottom: 10px;">Le chiavi vengono salvate solo nel tuo browser, mai sui server.</p>
+                <input type="password" id="input-or-key" placeholder="sk-or-..." style="width: 100%; margin-bottom: 8px; padding: 8px; border-radius: 4px; border: none; box-sizing: border-box; background: #2d2d2d; color: white;">
+                <input type="password" id="input-hf-key" placeholder="hf_..." style="width: 100%; margin-bottom: 10px; padding: 8px; border-radius: 4px; border: none; box-sizing: border-box; background: #2d2d2d; color: white;">
+                <button onclick="if(window.salvaChiavi) salvaChiavi(); else alert('Assicurati di aver aggiornato config.js come spiegato prima!');" style="padding: 8px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">💾 Salva nel Browser</button>
             </div>
+        </details>
+        <div id="messages" class="message-area">
+        </div>
+        
         <div id="input-area">
             <input type="text" id="user-input" placeholder="Scrivi un messaggio..." autocomplete="off">
             <button id="send-btn">
@@ -23,12 +34,10 @@
     </div>
 
     <script src="config.js"></script>
-    
     <script src="reasoning-ui.js"></script>
     <script src="model-selector.js"></script>
     <script src="fal-selector.js"></script>
     <script src="debug-console.js"></script>
-    
     <script src="script.js"></script>
 </body>
 </html>
