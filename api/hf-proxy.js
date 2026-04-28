@@ -1,19 +1,20 @@
 export default async function handler(req, res) {
-    // Permetti solo richieste POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Metodo non consentito. Usa POST.' });
     }
 
     try {
-        // Legge ESATTAMENTE la variabile chiamata HF_API_KEY (come nel tuo screenshot)
         const HF_TOKEN = process.env.HF_API_KEY; 
         
         if (!HF_TOKEN) {
             return res.status(500).json({ error: 'Token HuggingFace mancante sul server Vercel.' });
         }
 
-        // URL del modello Flux
+        // ⚠️ IL BERSAGLIO ESATTO: nota la dicitura "api-inference" all'inizio dell'URL!
         const modelUrl = 'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell';
+
+        // Sicurezza extra per evitare che il payload venga formattato male
+        const payload = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
 
         const hfResponse = await fetch(modelUrl, {
             method: 'POST',
@@ -21,7 +22,7 @@ export default async function handler(req, res) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${HF_TOKEN}`
             },
-            body: JSON.stringify(req.body) // Passa "Genera un topo"
+            body: payload
         });
 
         if (!hfResponse.ok) {
@@ -29,7 +30,6 @@ export default async function handler(req, res) {
             return res.status(hfResponse.status).json({ error: `Errore HuggingFace: ${errText}` });
         }
 
-        // Recupera l'immagine e la rimanda al frontend
         const imageBuffer = await hfResponse.arrayBuffer();
         
         res.setHeader('Content-Type', 'image/jpeg');
