@@ -1,5 +1,5 @@
 /**
- * Modulo Chat Principale (Core Logic: Stream Blindato + Supporto Multimediale Fal.ai)
+ * Modulo Chat Principale (Core Logic: Stream Blindato, Debugger e Anti-Lag)
  */
 
 let chatHistory = [];
@@ -24,12 +24,18 @@ if (!sendBtn || !userInput || !messageArea) {
     console.log("✅ Event listeners collegati con successo.");
 }
 
+/**
+ * Determina se un modello supporta il reasoning nativo
+ */
 function isReasoningModel(modelId) {
     if (!modelId) return false;
     const id = modelId.toLowerCase();
     return id.includes('r1') || id.includes('reasoning') || id.includes('think');
 }
 
+/**
+ * Utility grafica per aggiungere messaggi
+ */
 function appendUserMessage(content, sender = 'user') {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message', sender);
@@ -38,6 +44,9 @@ function appendUserMessage(content, sender = 'user') {
     messageArea.scrollTop = messageArea.scrollHeight;
 }
 
+/**
+ * Utility per bloccare/sbloccare l'input
+ */
 function toggleLoading(isLoading) {
     userInput.disabled = isLoading;
     sendBtn.disabled = isLoading;
@@ -47,12 +56,15 @@ function toggleLoading(isLoading) {
 }
 
 /**
- * Gestore principale dell'invio con Bivio (OpenRouter vs Fal.ai)
+ * Gestore principale dell'invio
  */
 async function handleSendMessage() {
     console.log("▶️ Tentativo di invio messaggio...");
     
-    if (sendBtn.disabled) return;
+    if (sendBtn.disabled) {
+        console.warn("⚠️ Bottone disabilitato, invio ignorato.");
+        return;
+    }
 
     const text = userInput.value.trim();
     if (!text) return;
@@ -68,97 +80,10 @@ async function handleSendMessage() {
 
     try {
         if (typeof window.CONFIG === 'undefined') throw new Error("window.CONFIG non è definito.");
+        if (!window.CONFIG.API_KEY) throw new Error("API_KEY mancante nella configurazione.");
         if (!window.CONFIG.MODEL) throw new Error("MODEL mancante nella configurazione.");
 
-        // ════════════════════════════════════════════════════════════════════
-        // 🚀 BIVIO 1: MOTORE MULTIMEDIALE FAL.AI (Generazione Immagini e Video)
-        // ════════════════════════════════════════════════════════════════════
-        if (window.CONFIG.PROVIDER === 'fal') {
-            if (!window.CONFIG.FAL_KEY) throw new Error("Chiave API di Fal.ai mancante.");
-            
-            console.log(`🎨 Contattando Fal.ai per il modello: ${window.CONFIG.MODEL}...`);
-
-            msgDiv = document.createElement('div');
-            msgDiv.classList.add('message', 'ai');
-            
-            // UI di Attesa (Fal.ai non ha streaming, dobbiamo aspettare che l'immagine sia pronta)
-            const loadingText = document.createElement('div');
-            loadingText.innerHTML = "⏳ <i>Generazione in corso... (la creazione di video può richiedere fino a 1 minuto)</i>";
-            loadingText.style.color = "#9ca3af";
-            msgDiv.appendChild(loadingText);
-            messageArea.appendChild(msgDiv);
-            messageArea.scrollTop = messageArea.scrollHeight;
-
-            const response = await fetch(`https://fal.run/${window.CONFIG.MODEL}`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Key ${window.CONFIG.FAL_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ prompt: text })
-            });
-
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.detail || `Errore HTTP Fal.ai: ${response.status}`);
-            }
-
-            const data = await response.json();
-            msgDiv.innerHTML = ''; // Rimuoviamo il testo di attesa
-            
-            let mediaUrl = null;
-            let isVideo = false;
-
-            // Fal.ai ha formati di risposta diversi a seconda se è foto o video, li intercettiamo tutti
-            if (data.images && data.images.length > 0) {
-                mediaUrl = data.images[0].url;
-            } else if (data.video && data.video.url) {
-                mediaUrl = data.video.url;
-                isVideo = true;
-            } else if (data.url) {
-                mediaUrl = data.url;
-                isVideo = mediaUrl.endsWith('.mp4');
-            }
-
-            // Mostriamo il file multimediale a schermo
-            if (mediaUrl) {
-                if (isVideo) {
-                    const vidEl = document.createElement('video');
-                    vidEl.src = mediaUrl;
-                    vidEl.controls = true;
-                    vidEl.autoplay = true;
-                    vidEl.loop = true;
-                    vidEl.style.maxWidth = '100%';
-                    vidEl.style.borderRadius = '8px';
-                    msgDiv.appendChild(vidEl);
-                } else {
-                    const imgEl = document.createElement('img');
-                    imgEl.src = mediaUrl;
-                    imgEl.style.maxWidth = '100%';
-                    imgEl.style.borderRadius = '8px';
-                    // Effetto per aprire l'immagine in grande se cliccata
-                    imgEl.onclick = () => window.open(mediaUrl, '_blank'); 
-                    imgEl.style.cursor = 'pointer';
-                    msgDiv.appendChild(imgEl);
-                }
-                chatHistory.push({ role: 'assistant', content: `[Media generato con successo: ${mediaUrl}]` });
-                console.log("✅ Fal.ai: Generazione multimediale completata.");
-            } else {
-                msgDiv.textContent = "Il modello ha completato il lavoro, ma non è stato possibile estrarre l'URL del file.";
-                console.warn("Dati grezzi Fal.ai:", data);
-            }
-
-            messageArea.scrollTop = messageArea.scrollHeight;
-            toggleLoading(false);
-            return; // 🛑 INTERROMPE L'ESECUZIONE QUI (Non prosegue verso OpenRouter)
-        }
-
-        // ════════════════════════════════════════════════════════════════════
-        // 💬 BIVIO 2: MOTORE TESTUALE OPENROUTER (Chat Streaming)
-        // ════════════════════════════════════════════════════════════════════
-        
-        if (!window.CONFIG.API_KEY) throw new Error("API_KEY OpenRouter mancante.");
-        console.log(`📡 Contattando OpenRouter per il modello: ${window.CONFIG.MODEL}...`);
+        console.log(`📡 Contattando API per il modello: ${window.CONFIG.MODEL}...`);
 
         const requestBody = {
             model: window.CONFIG.MODEL,
@@ -167,7 +92,7 @@ async function handleSendMessage() {
             include_reasoning: true
         };
 
-        const response = await fetch(window.CONFIG.API_URL || 'https://openrouter.ai/api/v1/chat/completions', {
+        const response = await fetch(window.CONFIG.API_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -182,6 +107,8 @@ async function handleSendMessage() {
             const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.error?.message || `Errore HTTP ${response.status} del server.`);
         }
+
+        console.log("✅ Connessione stabilita, inizio lettura stream...");
 
         msgDiv = document.createElement('div');
         msgDiv.classList.add('message', 'ai');
@@ -202,12 +129,15 @@ async function handleSendMessage() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
+        
         let nativeReasoningBuffer = "";
         let rawContentBuffer = "";
         let receivedValidData = false;
+
         let displayContent = "";
         let displayReasoning = "";
 
+        // Motore di Rendering Anti-Lag (requestAnimationFrame)
         let renderRequested = false;
         const updateUI = () => {
             if (!isStreamActive) return;
@@ -237,9 +167,14 @@ async function handleSendMessage() {
             }
         };
 
+        // Lettura Stream
+        let chunkCount = 0;
         while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+                console.log(`⏹️ Stream completato. Chunk totali ricevuti: ${chunkCount}`);
+                break;
+            }
             
             buffer += decoder.decode(value, { stream: true });
             let lines = buffer.split('\n');
@@ -248,23 +183,40 @@ async function handleSendMessage() {
             for (let line of lines) {
                 line = line.trim();
                 if (!line || line.startsWith(':')) continue;
-                if (line.includes('"error"')) throw new Error("Il server ha inviato un errore JSON all'interno del flusso.");
+
+                if (line.includes('"error"')) {
+                    throw new Error("Il server ha inviato un errore JSON all'interno del flusso.");
+                }
 
                 if (line.startsWith('data: ')) {
                     const dataStr = line.substring(6).trim();
-                    if (dataStr === '[DONE]') continue;
+                    if (dataStr === '[DONE]') {
+                        console.log("🏁 Ricevuto [DONE] dal server.");
+                        continue;
+                    }
                     
                     try {
                         const dataObj = JSON.parse(dataStr);
                         const delta = dataObj.choices?.[0]?.delta;
 
+                        // ─── LOG DIAGNOSTICO ───────────────────────────────────────
+                        // Mostra ogni delta ricevuto per capire la struttura di OpenRouter.
+                        // Rimuovi questo blocco una volta che il reasoning funziona.
+                        if (delta && Object.keys(delta).length > 0) {
+                            chunkCount++;
+                            console.log(`📦 Delta #${chunkCount}:`, JSON.stringify(delta));
+                        }
+                        // ──────────────────────────────────────────────────────────
+
                         if (!delta) continue;
                         receivedValidData = true;
 
+                        // Legge reasoning sia da campo nativo che da reasoning_content (OpenRouter)
                         if (delta.reasoning)         nativeReasoningBuffer += delta.reasoning;
                         if (delta.reasoning_content) nativeReasoningBuffer += delta.reasoning_content;
                         if (delta.content)           rawContentBuffer += delta.content;
 
+                        // Gestione tag <think> inline nel content
                         const thinkStart = rawContentBuffer.indexOf('<think>');
                         if (thinkStart !== -1) {
                             const thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
@@ -284,16 +236,13 @@ async function handleSendMessage() {
                         requestRender();
                         
                     } catch (e) {
-                        // Salta i chunk illeggibili
+                        console.warn("⚠️ Chunk non parsabile ignorato:", line);
                     }
                 }
             }
         }
 
-        if (liveReasoning && displayReasoning) {
-            liveReasoning.updateText(displayReasoning);
-        }
-
+        // Chiusura e salvataggio
         isStreamActive = false;
         let finalContent = displayContent.trim();
         textNode.textContent = finalContent;
@@ -304,10 +253,17 @@ async function handleSendMessage() {
             liveReasoning.finish(hasReasoning);
         }
 
+        // Report finale in console
+        console.log("📊 REPORT FINALE:");
+        console.log("   → nativeReasoningBuffer:", nativeReasoningBuffer.substring(0, 200) || "(vuoto)");
+        console.log("   → rawContentBuffer:", rawContentBuffer.substring(0, 200) || "(vuoto)");
+        console.log("   → finalContent:", finalContent.substring(0, 200) || "(vuoto)");
+
         if (!receivedValidData || (finalContent === "" && displayReasoning === "")) {
             throw new Error("Il server ha chiuso la connessione senza inviare testo.");
         } else {
             chatHistory.push({ role: 'assistant', content: finalContent });
+            console.log("✅ Risposta IA completata e salvata nella history.");
         }
 
     } catch (error) {
@@ -315,7 +271,7 @@ async function handleSendMessage() {
         isStreamActive = false;
         
         if (msgDiv && msgDiv.parentNode) {
-            if (msgDiv.textContent === "▮" || msgDiv.textContent === "" || msgDiv.textContent.includes("Generazione in corso")) {
+            if (msgDiv.textContent === "▮" || msgDiv.textContent === "") {
                 messageArea.removeChild(msgDiv);
             } else {
                 const errorAlert = document.createElement('div');
