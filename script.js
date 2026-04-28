@@ -1,17 +1,22 @@
 /**
- * Modulo Chat Principale (Core Logic: Gestione Testo Streaming + Generazione Immagini)
+ * NEMOADAM CLOUD UI - Core Logic
+ * Gestione Text Streaming, Image Generation Proxy & HF Catalog Sync
  */
 
 let chatHistory = [];
 
+// Elementi UI
 const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
+const catalogContainer = document.querySelector('.catalog-grid') || document.getElementById('catalog-items');
 
-console.log("⚙️ script.js caricato (Supporto Immagini attivo via Proxy Dinamico).");
+console.log("⚙️ script.js caricato. Sistema di sincronizzazione catalogo HF attivo.");
+
+// ─── INIZIALIZZAZIONE ────────────────────────────────────────────────────────
 
 if (!sendBtn || !userInput || !messageArea) {
-    console.error("❌ Errore critico: Elementi UI non trovati!");
+    console.error("❌ Errore: Elementi UI critici mancanti.");
 } else {
     sendBtn.addEventListener('click', handleSendMessage);
     userInput.addEventListener('keypress', (e) => {
@@ -21,21 +26,65 @@ if (!sendBtn || !userInput || !messageArea) {
         }
     });
     userInput.focus();
+    
+    // Avvia la scansione dei modelli gratuiti all'apertura
+    syncHuggingFaceCatalog();
 }
 
-function appendUserMessage(content, sender = 'user') {
-    const msgDiv = document.createElement('div');
-    msgDiv.classList.add('message', sender);
-    msgDiv.textContent = content;
-    messageArea.appendChild(msgDiv);
-    messageArea.scrollTop = messageArea.scrollHeight;
+// ─── SINCRONIZZAZIONE CATALOGO MODELLI ───────────────────────────────────────
+
+/**
+ * Recupera i modelli text-to-image gratuiti da HF e popola la UI
+ */
+async function syncHuggingFaceCatalog() {
+    console.log("📡 Scansione modelli gratuiti su Hugging Face...");
+    const limit = 50; // Recuperiamo i primi 50 modelli più popolari
+    const url = `https://huggingface.co/api/models?pipeline_tag=text-to-image&sort=downloads&direction=-1&limit=${limit}&filter=inference`;
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Impossibile contattare HF");
+        const models = await response.json();
+
+        if (catalogContainer) {
+            catalogContainer.innerHTML = ""; // Pulisce il catalogo esistente
+            
+            models.forEach(m => {
+                const card = document.createElement('div');
+                card.style.cssText = "padding:10px; background:#1a1a1a; border:1px solid #333; border-radius:5px; cursor:pointer; margin:5px; font-size:12px; transition: 0.3s;";
+                card.innerHTML = `
+                    <div style="color:#00ff88; font-weight:bold; overflow:hidden; text-overflow:ellipsis;">${m.id.split('/')[1] || m.id}</div>
+                    <div style="color:#888; font-size:10px;">Autore: ${m.author || 'Innocuo'}</div>
+                    <div style="color:#555; font-size:9px;">⬇️ ${m.downloads.toLocaleString()}</div>
+                `;
+                
+                card.onclick = () => selectModel(m.id);
+                card.onmouseover = () => card.style.borderColor = "#00ff88";
+                card.onmouseout = () => card.style.borderColor = "#333";
+                
+                catalogContainer.appendChild(card);
+            });
+            console.log(`✅ Catalogo popolato con ${models.length} modelli.`);
+        }
+    } catch (e) {
+        console.error("❌ Errore sincronizzazione catalogo:", e);
+    }
 }
 
-function toggleLoading(isLoading) {
-    userInput.disabled = isLoading;
-    sendBtn.disabled = isLoading;
-    if (!isLoading) userInput.focus();
+function selectModel(modelId) {
+    if (window.CONFIG) {
+        window.CONFIG.MODEL = modelId;
+        window.CONFIG.PROVIDER = 'huggingface';
+        
+        // Aggiorna badge visivo se esiste
+        const badge = document.querySelector('.current-model-badge') || document.querySelector('.status-bar span');
+        if (badge) badge.textContent = `MODELLO: ${modelId.toUpperCase()}`;
+        
+        appendUserMessage(`Sistema: Modello impostato su ${modelId}`, 'ai');
+    }
 }
+
+// ─── GESTIONE MESSAGGI ───────────────────────────────────────────────────────
 
 async function handleSendMessage() {
     if (sendBtn.disabled) return;
@@ -51,15 +100,14 @@ async function handleSendMessage() {
     let msgDiv = document.createElement('div');
     msgDiv.classList.add('message', 'ai');
     const contentNode = document.createElement('div');
-    contentNode.style.whiteSpace = "pre-wrap";
-    contentNode.style.wordBreak = "break-word";
+    contentNode.style.cssText = "white-space: pre-wrap; word-break: break-word;";
     contentNode.textContent = "⌛ Elaborazione...";
     msgDiv.appendChild(contentNode);
     messageArea.appendChild(msgDiv);
     messageArea.scrollTop = messageArea.scrollHeight;
 
     if (typeof window.CONFIG === 'undefined') {
-        contentNode.textContent = "❌ Errore: CONFIG non definito.";
+        contentNode.textContent = "❌ Errore: CONFIG non caricato.";
         toggleLoading(false);
         return;
     }
@@ -68,66 +116,41 @@ async function handleSendMessage() {
     const activeToken = window.CONFIG._activeKey || window.CONFIG.API_KEY;
     const model = window.CONFIG.MODEL;
 
-    if (!activeToken && provider !== 'huggingface') {
-        contentNode.textContent = "⚠️ Chiave API testuale mancante nelle impostazioni.";
-        toggleLoading(false);
-        return;
-    }
-
-    console.log(`📡 Provider: ${provider} | Modello: ${model}`);
-
     try {
-        // =====================================================================
-        // RAMO A: IMMAGINI (Proxy)
-        // =====================================================================
+        // --- RAMO IMMAGINI (HuggingFace Proxy) ---
         if (provider === 'huggingface') {
-            contentNode.textContent = "🎨 Generazione in corso...▮";
-
-            // INVIAMO AL PROXY SIA IL TESTO CHE IL MODELLO SCELTO NELLA UI
-            const hfRequestBody = { 
-                inputs: text,
-                model: model 
-            };
+            contentNode.textContent = "🎨 Generazione immagine in corso...▮";
 
             const response = await fetch('/api/hf-proxy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(hfRequestBody)
+                body: JSON.stringify({ inputs: text, model: model })
             });
 
             if (!response.ok) {
-                const errText = await response.text();
-                let errMsg = `Errore HTTP ${response.status}`;
-                try {
-                    const errJson = JSON.parse(errText);
-                    errMsg = errJson.error || errMsg;
-                } catch (_) { errMsg = errText || errMsg; }
-                throw new Error(errMsg);
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error || `Errore HTTP ${response.status}`);
             }
 
             const contentType = response.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
                 const json = await response.json();
-                const imgSrc = json?.[0]?.url || json?.[0]?.image || json?.url || json?.image;
+                const imgSrc = json?.[0]?.url || json?.url || json?.image;
                 if (imgSrc) renderImage(imgSrc, text, contentNode);
-                else contentNode.textContent = "⚠️ Immagine non trovata nel JSON.";
+                else throw new Error("Risposta JSON valida ma immagine non trovata.");
             } else {
                 const blob = await response.blob();
-                const imageUrl = URL.createObjectURL(blob);
-                renderImage(imageUrl, text, contentNode);
+                renderImage(URL.createObjectURL(blob), text, contentNode);
             }
-
-            chatHistory.push({ role: 'assistant', content: `[Immagine Generata: ${text}]` });
-        }
-        // =====================================================================
-        // RAMO B: TESTO (Standard Streaming)
-        // =====================================================================
+            chatHistory.push({ role: 'assistant', content: `[Immagine: ${text}]` });
+        } 
+        
+        // --- RAMO TESTO (Streaming) ---
         else {
             contentNode.textContent = "▮";
             const liveReasoning = window.ReasoningUI ? window.ReasoningUI.createLiveReasoningBlock() : null;
             if (liveReasoning) msgDiv.insertBefore(liveReasoning.container, contentNode);
 
-            const requestBody = { model: model, messages: chatHistory, stream: true, include_reasoning: true };
             const response = await fetch(window.CONFIG.API_URL, {
                 method: 'POST',
                 headers: {
@@ -136,95 +159,67 @@ async function handleSendMessage() {
                     'HTTP-Referer': window.location.href,
                     'X-Title': 'NemoAdam Cloud'
                 },
-                body: JSON.stringify(requestBody)
+                body: JSON.stringify({ model: model, messages: chatHistory, stream: true })
             });
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error?.message || `Errore HTTP ${response.status}`);
-            }
+            if (!response.ok) throw new Error("Errore nella risposta del server.");
 
             const reader = response.body.getReader();
-            const decoder = new TextDecoder("utf-8");
-            let buffer = "", nativeReasoningBuffer = "", rawContentBuffer = "", displayContent = "", displayReasoning = "";
-            let isStreamActive = true, renderRequested = false;
-
-            const updateUI = () => {
-                if (!isStreamActive) return;
-                if (liveReasoning && displayReasoning) liveReasoning.updateText(displayReasoning);
-                contentNode.textContent = displayContent.trimStart() + " ▮";
-                messageArea.scrollTop = messageArea.scrollHeight;
-                renderRequested = false;
-            };
-            const requestRender = () => { if (!renderRequested) { renderRequested = true; requestAnimationFrame(updateUI); } };
+            const decoder = new TextDecoder();
+            let rawBuffer = "";
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                let lines = buffer.split('\n');
-                buffer = lines.pop();
-
+                
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+                
                 for (let line of lines) {
-                    line = line.trim();
-                    if (!line || !line.startsWith('data: ')) continue;
-                    const dataStr = line.substring(6).trim();
-                    if (dataStr === '[DONE]') continue;
-                    try {
-                        const dataObj = JSON.parse(dataStr);
-                        const delta = dataObj.choices?.[0]?.delta;
-                        if (!delta) continue;
-                        if (delta.reasoning_content) nativeReasoningBuffer += delta.reasoning_content;
-                        if (delta.content) rawContentBuffer += delta.content;
-
-                        const thinkStart = rawContentBuffer.indexOf('<think>');
-                        if (thinkStart !== -1) {
-                            const thinkEnd = rawContentBuffer.indexOf('</think>', thinkStart);
-                            if (thinkEnd !== -1) {
-                                displayContent = rawContentBuffer.substring(0, thinkStart) + rawContentBuffer.substring(thinkEnd + 8);
-                                displayReasoning = rawContentBuffer.substring(thinkStart + 7, thinkEnd);
-                            } else {
-                                displayContent = rawContentBuffer.substring(0, thinkStart);
-                                displayReasoning = rawContentBuffer.substring(thinkStart + 7);
-                            }
-                        } else { displayContent = rawContentBuffer; }
-                        displayReasoning = [nativeReasoningBuffer, displayReasoning].filter(Boolean).join("\n").trim();
-                        requestRender();
-                    } catch (e) {}
+                    if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                        try {
+                            const data = JSON.parse(line.substring(6));
+                            const content = data.choices[0].delta.content || "";
+                            rawBuffer += content;
+                            contentNode.textContent = rawBuffer + " ▮";
+                            messageArea.scrollTop = messageArea.scrollHeight;
+                        } catch (e) {}
+                    }
                 }
             }
-
-            isStreamActive = false;
-            let finalContent = displayContent.trim();
-            contentNode.textContent = finalContent;
-            messageArea.scrollTop = messageArea.scrollHeight;
-
-            if (liveReasoning) liveReasoning.finish(nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
-            if (finalContent === "" && displayReasoning === "") throw new Error("Risposta vuota dal server.");
-            else chatHistory.push({ role: 'assistant', content: finalContent });
+            contentNode.textContent = rawBuffer;
+            chatHistory.push({ role: 'assistant', content: rawBuffer });
         }
     } catch (error) {
-        console.error('❌ ERRORE CRITICO:', error);
-        if (["⌛ Elaborazione...", "▮"].some(s => contentNode.textContent === s) || contentNode.textContent.includes("Generazione in corso")) {
-            contentNode.textContent = `❌ Errore di sistema: ${error.message}`;
-            contentNode.style.color = "#ef4444";
-        } else {
-            const errorAlert = document.createElement('div');
-            errorAlert.style.cssText = "color: #ef4444; font-size: 14px; margin-top: 10px; font-weight: bold;";
-            errorAlert.textContent = `[Errore interruzione: ${error.message}]`;
-            msgDiv.appendChild(errorAlert);
-        }
-        if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') chatHistory.pop();
+        console.error("❌ ERRORE:", error);
+        contentNode.textContent = `❌ Errore: ${error.message}`;
+        contentNode.style.color = "#ef4444";
     } finally {
         toggleLoading(false);
     }
 }
 
+// ─── HELPERS UI ──────────────────────────────────────────────────────────────
+
+function appendUserMessage(content, sender = 'user') {
+    const msgDiv = document.createElement('div');
+    msgDiv.classList.add('message', sender);
+    msgDiv.textContent = content;
+    messageArea.appendChild(msgDiv);
+    messageArea.scrollTop = messageArea.scrollHeight;
+}
+
 function renderImage(src, prompt, container) {
     container.textContent = "";
-    const imgEl = document.createElement('img');
-    imgEl.src = src;
-    imgEl.style.cssText = "max-width:100%;border-radius:8px;margin-top:10px;box-shadow:0 4px 6px rgba(0,0,0,0.3);";
-    imgEl.onload = () => messageArea.scrollTop = messageArea.scrollHeight;
-    container.appendChild(imgEl);
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.cssText = "max-width:100%; border-radius:8px; margin-top:10px; border: 2px solid #00ff88; box-shadow: 0 0 15px rgba(0,255,136,0.2);";
+    img.onload = () => messageArea.scrollTop = messageArea.scrollHeight;
+    container.appendChild(img);
+}
+
+function toggleLoading(isLoading) {
+    userInput.disabled = isLoading;
+    sendBtn.disabled = isLoading;
+    if (!isLoading) userInput.focus();
 }
