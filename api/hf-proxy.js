@@ -1,50 +1,48 @@
-/**
- * Proxy Vercel serverless per HuggingFace Inference API
- * Evita il blocco CORS dal browser.
- * 
- * SETUP: Aggiungi HF_API_KEY nelle Environment Variables di Vercel.
- * URL chiamata: /api/hf-proxy?model=black-forest-labs/FLUX.1-schnell
- */
+// File: api/hf-proxy.js
+
 export default async function handler(req, res) {
-    // Solo POST
+    // Permetti solo richieste POST
     if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
-    }
-
-    const model = req.query.model;
-    if (!model) {
-        return res.status(400).json({ error: 'Parametro "model" mancante nella query string.' });
-    }
-
-    // Leggi la chiave HF dalle env vars di Vercel (mai esposta al client)
-    const hfKey = process.env.HF_API_KEY;
-    if (!hfKey) {
-        return res.status(500).json({
-            error: 'HF_API_KEY non configurata. Aggiungila nelle Environment Variables di Vercel.'
-        });
+        return res.status(405).json({ error: 'Metodo non consentito. Usa POST.' });
     }
 
     try {
-        const hfRes = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+        // Recupera il token da Vercel (assicurati che il nome della variabile sia esatto)
+        const HF_TOKEN = process.env.hf_JxCjv_INSERISCI_IL_RESTO_QUI; // Sostituisci con il nome reale della tua env var
+        
+        if (!HF_TOKEN) {
+            return res.status(500).json({ error: 'Token HuggingFace mancante sul server Vercel.' });
+        }
+
+        // Il modello che vuoi usare (puoi anche passarlo dal frontend)
+        const modelUrl = 'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell';
+
+        const hfResponse = await fetch(modelUrl, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${hfKey}`,
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${HF_TOKEN}`
             },
-            body: JSON.stringify(req.body),
+            body: JSON.stringify(req.body) // Passa il payload { inputs: "Gejera un pollo" }
         });
 
-        // Passa il Content-Type originale (image/png, application/json, ecc.)
-        const contentType = hfRes.headers.get('content-type') || 'application/octet-stream';
-        res.setHeader('Content-Type', contentType);
-        res.setHeader('Access-Control-Allow-Origin', '*');
+        if (!hfResponse.ok) {
+            const errText = await hfResponse.text();
+            return res.status(hfResponse.status).json({ error: `Errore HuggingFace: ${errText}` });
+        }
 
-        // Passa il body binario (immagine) o JSON invariato
-        const buffer = await hfRes.arrayBuffer();
-        return res.status(hfRes.status).send(Buffer.from(buffer));
+        // Recupera l'immagine come ArrayBuffer
+        const imageBuffer = await hfResponse.arrayBuffer();
+        
+        // Imposta gli header corretti per restituire un'immagine binaria
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'no-store, max-age=0');
+        
+        // Invia il buffer al frontend
+        return res.status(200).send(Buffer.from(imageBuffer));
 
-    } catch (err) {
-        console.error('[hf-proxy] Errore:', err);
-        return res.status(502).json({ error: `Errore proxy: ${err.message}` });
+    } catch (error) {
+        console.error("Errore nel proxy:", error);
+        return res.status(500).json({ error: `Errore interno del server proxy: ${error.message}` });
     }
 }
