@@ -8,11 +8,10 @@ const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 
-console.log("⚙️ script.js caricato correttamente (Supporto Immagini attivo via Proxy).");
+console.log("⚙️ script.js caricato (Supporto Immagini attivo via Proxy Dinamico).");
 
-// Inizializzazione UI
 if (!sendBtn || !userInput || !messageArea) {
-    console.error("❌ Errore critico: Elementi UI non trovati nel file HTML! Controlla gli ID.");
+    console.error("❌ Errore critico: Elementi UI non trovati!");
 } else {
     sendBtn.addEventListener('click', handleSendMessage);
     userInput.addEventListener('keypress', (e) => {
@@ -22,7 +21,6 @@ if (!sendBtn || !userInput || !messageArea) {
         }
     });
     userInput.focus();
-    console.log("✅ Event listeners collegati con successo.");
 }
 
 function appendUserMessage(content, sender = 'user') {
@@ -40,7 +38,6 @@ function toggleLoading(isLoading) {
 }
 
 async function handleSendMessage() {
-    console.log("▶️ Tentativo di invio messaggio...");
     if (sendBtn.disabled) return;
 
     const text = userInput.value.trim();
@@ -51,7 +48,6 @@ async function handleSendMessage() {
     chatHistory.push({ role: 'user', content: text });
     toggleLoading(true);
 
-    // Area messaggio IA
     let msgDiv = document.createElement('div');
     msgDiv.classList.add('message', 'ai');
     const contentNode = document.createElement('div');
@@ -72,9 +68,8 @@ async function handleSendMessage() {
     const activeToken = window.CONFIG._activeKey || window.CONFIG.API_KEY;
     const model = window.CONFIG.MODEL;
 
-    // Controllo token: NON richiesto lato client se usiamo il proxy per HuggingFace
     if (!activeToken && provider !== 'huggingface') {
-        contentNode.textContent = "⚠️ Chiave API testuale mancante nelle impostazioni (⚙️).";
+        contentNode.textContent = "⚠️ Chiave API testuale mancante nelle impostazioni.";
         toggleLoading(false);
         return;
     }
@@ -83,15 +78,17 @@ async function handleSendMessage() {
 
     try {
         // =====================================================================
-        // RAMO A: GENERAZIONE IMMAGINI (HuggingFace via Proxy Vercel locale)
+        // RAMO A: IMMAGINI (Proxy)
         // =====================================================================
         if (provider === 'huggingface') {
-            console.log("🎨 Richiesta generazione immagine tramite proxy locale /api/hf-proxy...");
-            contentNode.textContent = "🎨 Generazione immagine in corso (potrebbe volerci un minuto)...▮";
+            contentNode.textContent = "🎨 Generazione in corso...▮";
 
-            const hfRequestBody = { inputs: text };
+            // INVIAMO AL PROXY SIA IL TESTO CHE IL MODELLO SCELTO NELLA UI
+            const hfRequestBody = { 
+                inputs: text,
+                model: model 
+            };
 
-            // ⚠️ Chiamiamo forzatamente l'endpoint del proxy locale!
             const response = await fetch('/api/hf-proxy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -109,53 +106,35 @@ async function handleSendMessage() {
             }
 
             const contentType = response.headers.get('content-type') || '';
-            console.log("📦 Content-Type ricevuto:", contentType);
-
             if (contentType.includes('application/json')) {
                 const json = await response.json();
-                console.log("📦 Risposta JSON HF:", json);
-
                 const imgSrc = json?.[0]?.url || json?.[0]?.image || json?.url || json?.image;
-                if (imgSrc) {
-                    renderImage(imgSrc, text, contentNode);
-                } else {
-                    contentNode.textContent = "⚠️ Risposta non riconosciuta: " + JSON.stringify(json).substring(0, 200);
-                }
+                if (imgSrc) renderImage(imgSrc, text, contentNode);
+                else contentNode.textContent = "⚠️ Immagine non trovata nel JSON.";
             } else {
-                console.log("✅ Immagine binaria ricevuta, conversione in blob...");
                 const blob = await response.blob();
                 const imageUrl = URL.createObjectURL(blob);
                 renderImage(imageUrl, text, contentNode);
             }
 
             chatHistory.push({ role: 'assistant', content: `[Immagine Generata: ${text}]` });
-            console.log("✅ Immagine visualizzata con successo.");
         }
-
         // =====================================================================
-        // RAMO B: CHAT TESTUALE STREAMING (OpenRouter / Standard)
+        // RAMO B: TESTO (Standard Streaming)
         // =====================================================================
         else {
-            console.log("✍️ Richiesta chat testuale streaming...");
             contentNode.textContent = "▮";
-
             const liveReasoning = window.ReasoningUI ? window.ReasoningUI.createLiveReasoningBlock() : null;
             if (liveReasoning) msgDiv.insertBefore(liveReasoning.container, contentNode);
 
-            const requestBody = {
-                model: model,
-                messages: chatHistory,
-                stream: true,
-                include_reasoning: true
-            };
-
+            const requestBody = { model: model, messages: chatHistory, stream: true, include_reasoning: true };
             const response = await fetch(window.CONFIG.API_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${activeToken}`,
                     'HTTP-Referer': window.location.href,
-                    'X-Title': 'NemoAdam Cloud UI'
+                    'X-Title': 'NemoAdam Cloud'
                 },
                 body: JSON.stringify(requestBody)
             });
@@ -167,14 +146,9 @@ async function handleSendMessage() {
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
-            let buffer = "";
-            let nativeReasoningBuffer = "";
-            let rawContentBuffer = "";
-            let displayContent = "";
-            let displayReasoning = "";
-            let isStreamActive = true;
+            let buffer = "", nativeReasoningBuffer = "", rawContentBuffer = "", displayContent = "", displayReasoning = "";
+            let isStreamActive = true, renderRequested = false;
 
-            let renderRequested = false;
             const updateUI = () => {
                 if (!isStreamActive) return;
                 if (liveReasoning && displayReasoning) liveReasoning.updateText(displayReasoning);
@@ -182,9 +156,7 @@ async function handleSendMessage() {
                 messageArea.scrollTop = messageArea.scrollHeight;
                 renderRequested = false;
             };
-            const requestRender = () => {
-                if (!renderRequested) { renderRequested = true; requestAnimationFrame(updateUI); }
-            };
+            const requestRender = () => { if (!renderRequested) { renderRequested = true; requestAnimationFrame(updateUI); } };
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -215,9 +187,7 @@ async function handleSendMessage() {
                                 displayContent = rawContentBuffer.substring(0, thinkStart);
                                 displayReasoning = rawContentBuffer.substring(thinkStart + 7);
                             }
-                        } else {
-                            displayContent = rawContentBuffer;
-                        }
+                        } else { displayContent = rawContentBuffer; }
                         displayReasoning = [nativeReasoningBuffer, displayReasoning].filter(Boolean).join("\n").trim();
                         requestRender();
                     } catch (e) {}
@@ -229,23 +199,13 @@ async function handleSendMessage() {
             contentNode.textContent = finalContent;
             messageArea.scrollTop = messageArea.scrollHeight;
 
-            if (liveReasoning) {
-                liveReasoning.finish(nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
-            }
-
-            if (finalContent === "" && displayReasoning === "") {
-                throw new Error("Il server non ha inviato nessuna risposta valida.");
-            } else {
-                chatHistory.push({ role: 'assistant', content: finalContent });
-            }
+            if (liveReasoning) liveReasoning.finish(nativeReasoningBuffer.length > 0 || rawContentBuffer.includes('<think>'));
+            if (finalContent === "" && displayReasoning === "") throw new Error("Risposta vuota dal server.");
+            else chatHistory.push({ role: 'assistant', content: finalContent });
         }
-
     } catch (error) {
         console.error('❌ ERRORE CRITICO:', error);
-        const wasEmpty = ["⌛ Elaborazione...", "▮"].some(s => contentNode.textContent === s)
-            || contentNode.textContent.includes("Generazione immagine");
-
-        if (wasEmpty) {
+        if (["⌛ Elaborazione...", "▮"].some(s => contentNode.textContent === s) || contentNode.textContent.includes("Generazione in corso")) {
             contentNode.textContent = `❌ Errore di sistema: ${error.message}`;
             contentNode.style.color = "#ef4444";
         } else {
@@ -254,22 +214,17 @@ async function handleSendMessage() {
             errorAlert.textContent = `[Errore interruzione: ${error.message}]`;
             msgDiv.appendChild(errorAlert);
         }
-        if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') {
-            chatHistory.pop();
-        }
+        if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') chatHistory.pop();
     } finally {
         toggleLoading(false);
     }
 }
 
-// ── Helper: mostra immagine nel chat ──────────────────────────────────────────
 function renderImage(src, prompt, container) {
     container.textContent = "";
     const imgEl = document.createElement('img');
     imgEl.src = src;
-    imgEl.alt = `Immagine generata: ${prompt}`;
     imgEl.style.cssText = "max-width:100%;border-radius:8px;margin-top:10px;box-shadow:0 4px 6px rgba(0,0,0,0.3);";
     imgEl.onload = () => messageArea.scrollTop = messageArea.scrollHeight;
-    imgEl.onerror = () => { container.textContent = "⚠️ Immagine ricevuta ma non visualizzabile. Src: " + src.substring(0, 80); };
     container.appendChild(imgEl);
 }
