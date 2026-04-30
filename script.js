@@ -1,22 +1,21 @@
 /**
- * NEMOADAM CLOUD UI - Core Logic
- * Gestione Text Streaming, Image Generation Proxy & HF Catalog Sync
+ * NEMOADAM CLOUD UI - Core Logic Completa
+ * Gestione Text Streaming, Image Proxy, Catalogo Dinamico e Stato Real-Time
  */
 
 let chatHistory = [];
 
-// Elementi UI
+// Elementi UI Chat
 const messageArea = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
-const catalogContainer = document.querySelector('.catalog-grid') || document.getElementById('catalog-items');
 
-console.log("⚙️ script.js caricato. Sistema di sincronizzazione catalogo HF attivo.");
+console.log("⚙️ script.js caricato. Inizializzazione sistema globale...");
 
-// ─── INIZIALIZZAZIONE ────────────────────────────────────────────────────────
+// ─── INIZIALIZZAZIONE CHAT ───────────────────────────────────────────────────
 
 if (!sendBtn || !userInput || !messageArea) {
-    console.error("❌ Errore: Elementi UI critici mancanti.");
+    console.error("❌ Errore: Elementi UI critici della chat mancanti.");
 } else {
     sendBtn.addEventListener('click', handleSendMessage);
     userInput.addEventListener('keypress', (e) => {
@@ -26,65 +25,253 @@ if (!sendBtn || !userInput || !messageArea) {
         }
     });
     userInput.focus();
-    
-    // Avvia la scansione dei modelli gratuiti all'apertura
-    syncHuggingFaceCatalog();
 }
 
-// ─── SINCRONIZZAZIONE CATALOGO MODELLI ───────────────────────────────────────
+// ─── GESTORE CODE DI STATO (WORKER ASINCRONO) ────────────────────────────────
 
-/**
- * Recupera i modelli text-to-image gratuiti da HF e popola la UI
- */
-async function syncHuggingFaceCatalog() {
-    console.log("📡 Scansione modelli gratuiti su Hugging Face...");
-    const limit = 50; // Recuperiamo i primi 50 modelli più popolari
-    const url = `https://huggingface.co/api/models?pipeline_tag=text-to-image&sort=downloads&direction=-1&limit=${limit}&filter=inference`;
+class StatusQueue {
+    constructor(concurrency = 3) {
+        this.queue = [];
+        this.active = 0;
+        this.concurrency = concurrency;
+    }
+
+    add(modelId, badgeElement) {
+        this.queue.push({ modelId, badgeElement });
+        this.processNext();
+    }
+
+    async processNext() {
+        if (this.active >= this.concurrency || this.queue.length === 0) return;
+        
+        this.active++;
+        const task = this.queue.shift();
+        
+        try {
+            // Recupera il token di HF se configurato per evitare blocchi 401/429
+            const token = window.CONFIG?._activeKey || window.CONFIG?.API_KEY || '';
+            const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+            const res = await fetch(`https://api-inference.huggingface.co/status/${task.modelId}`, { headers });
+            
+            if (res.status === 404) {
+                this.updateUI(task.badgeElement, 'pro', 'NON DISP.');
+            } else if (res.status === 401 || res.status === 403) {
+                this.updateUI(task.badgeElement, 'pro', 'TOKEN RICHIESTO');
+            } else if (res.status === 429) {
+                this.updateUI(task.badgeElement, 'error', 'RATE LIMIT');
+            } else {
+                const data = await res.json();
+                if (data.error && data.error.toLowerCase().includes("pro")) {
+                    this.updateUI(task.badgeElement, 'pro', 'SOLO PRO');
+                } else if (data.loaded) {
+                    this.updateUI(task.badgeElement, 'online', 'ONLINE');
+                } else if (data.state === "Loadable") {
+                    this.updateUI(task.badgeElement, 'standby', 'IN STANDBY');
+                } else {
+                    this.updateUI(task.badgeElement, 'error', 'ERRORE SERVER');
+                }
+            }
+        } catch (e) {
+            // Se c'è un blocco CORS del browser, finisce qui
+            this.updateUI(task.badgeElement, 'error', 'CORS/OFFLINE');
+        }
+        
+        this.active--;
+        this.processNext();
+    }
+
+    updateUI(el, statusClass, text) {
+        if(!el) return;
+        el.className = `badge-container hf-badge-${statusClass}`;
+        el.textContent = text;
+    }
+}
+
+const hfStatusQueue = new StatusQueue(3); // 3 richieste parallele per non sovraccaricare
+
+// ─── COSTRUZIONE MENU MODELLI ────────────────────────────────────────────────
+
+const FIXED_HF_MODELS = [
+    { id: "black-forest-labs/FLUX.1-schnell", name: "FLUX.1 Schnell" },
+    { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "SDXL Base" }
+];
+
+async function initModelSelector() {
+    const header = document.querySelector('header');
+    if (!header || document.getElementById('model-menu-root')) return;
+
+    // Stili dinamici per i badge
+    const styleTag = document.createElement('style');
+    styleTag.textContent = `
+        .hf-badge-loading { font-size: 9px; background: #374151; color: #9ca3af; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: bold; }
+        .hf-badge-online { font-size: 9px; background: #065f46; color: #6ee7b7; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: bold; }
+        .hf-badge-standby { font-size: 9px; background: #92400e; color: #fcd34d; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: bold; }
+        .hf-badge-pro { font-size: 9px; background: #7f1d1d; color: #fca5a5; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: bold; }
+        .hf-badge-error { font-size: 9px; background: #000000; color: #ef4444; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: bold; border: 1px solid #ef4444;}
+    `;
+    document.head.appendChild(styleTag);
+
+    const rootContainer = document.createElement('div');
+    rootContainer.id = 'model-menu-root';
+    rootContainer.innerHTML = `
+        <div class="menu-item" id="main-trigger">
+            <span>📂 <b>Catalogo & Preferiti</b></span>
+            <span id="active-model-name" style="color:#60a5fa;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;">Caricamento...</span>
+            <span class="arrow">▶</span>
+        </div>
+        <div class="submenu" id="main-submenu"></div>
+    `;
+    header.parentNode.insertBefore(rootContainer, header.nextSibling);
+
+    const mainTrigger = rootContainer.querySelector('#main-trigger');
+    const mainSubmenu = rootContainer.querySelector('#main-submenu');
+
+    mainTrigger.onclick = () => mainTrigger.classList.toggle('open');
+
+    let allOpenRouterModels = [];
+    let dynamicHfModels = [];
+    let favoriteIds = JSON.parse(localStorage.getItem('nemotron_favorites')) || [];
 
     try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error("Impossibile contattare HF");
-        const models = await response.json();
+        // Fetch OpenRouter
+        const orRes = await fetch('https://openrouter.ai/api/v1/models');
+        if (orRes.ok) {
+            const orData = await orRes.json();
+            allOpenRouterModels = orData.data;
+        }
 
-        if (catalogContainer) {
-            catalogContainer.innerHTML = ""; // Pulisce il catalogo esistente
-            
-            models.forEach(m => {
-                const card = document.createElement('div');
-                card.style.cssText = "padding:10px; background:#1a1a1a; border:1px solid #333; border-radius:5px; cursor:pointer; margin:5px; font-size:12px; transition: 0.3s;";
-                card.innerHTML = `
-                    <div style="color:#00ff88; font-weight:bold; overflow:hidden; text-overflow:ellipsis;">${m.id.split('/')[1] || m.id}</div>
-                    <div style="color:#888; font-size:10px;">Autore: ${m.author || 'Innocuo'}</div>
-                    <div style="color:#555; font-size:9px;">⬇️ ${m.downloads.toLocaleString()}</div>
-                `;
-                
-                card.onclick = () => selectModel(m.id);
-                card.onmouseover = () => card.style.borderColor = "#00ff88";
-                card.onmouseout = () => card.style.borderColor = "#333";
-                
-                catalogContainer.appendChild(card);
-            });
-            console.log(`✅ Catalogo popolato con ${models.length} modelli.`);
+        // Fetch HF: rimossa la query &filter=inference per evitare che l'API droppi modelli validi
+        const hfRes = await fetch('https://huggingface.co/api/models?pipeline_tag=text-to-image&sort=downloads&direction=-1&limit=50');
+        if (hfRes.ok) {
+            dynamicHfModels = await hfRes.json();
+        } else {
+            console.warn("⚠️ Impossibile caricare i 50 modelli da HF, uso solo i fissi.");
         }
     } catch (e) {
-        console.error("❌ Errore sincronizzazione catalogo:", e);
+        console.error("❌ Errore caricamento modelli rete:", e);
+    }
+
+    renderAll();
+
+    function renderAll() {
+        mainSubmenu.innerHTML = '';
+        
+        const listCont = document.createElement('div');
+        mainSubmenu.appendChild(listCont);
+
+        // 1. Preferiti
+        const favDir = createFolder("⭐ Preferiti", listCont);
+        const favSub = createSubmenu(listCont);
+        renderFavorites(favSub);
+
+        // 2. OpenRouter
+        const orDir = createFolder("🔀 OpenRouter", listCont);
+        const orSub = createSubmenu(listCont);
+        allOpenRouterModels.forEach(m => createLeaf(m, 'openrouter', orSub, () => renderFavorites(favSub)));
+
+        // 3. HuggingFace
+        const hfDir = createFolder("🤗 HuggingFace (Reale)", listCont);
+        const hfSub = createSubmenu(listCont);
+        
+        const combinedHf = [...FIXED_HF_MODELS];
+        
+        if (Array.isArray(dynamicHfModels)) {
+            dynamicHfModels.forEach(m => {
+                if(!combinedHf.find(x => x.id === m.id)) {
+                    combinedHf.push({ id: m.id, name: m.id.split('/')[1] });
+                }
+            });
+        }
+
+        combinedHf.forEach(m => createLeaf(m, 'huggingface', hfSub, () => renderFavorites(favSub)));
+    }
+
+    function createFolder(label, parent) {
+        const div = document.createElement('div');
+        div.className = 'menu-item';
+        div.innerHTML = `<span>${label}</span><span class="arrow">▶</span>`;
+        div.onclick = (e) => { e.stopPropagation(); div.classList.toggle('open'); };
+        parent.appendChild(div);
+        return div;
+    }
+
+    function createSubmenu(parent) {
+        const div = document.createElement('div');
+        div.className = 'submenu';
+        parent.appendChild(div);
+        return div;
+    }
+
+    function createLeaf(model, provider, parent, onFavChange) {
+        const div = document.createElement('div');
+        div.className = 'menu-item model-leaf';
+        const isFav = favoriteIds.includes(model.id);
+        
+        const badgeHtml = provider === 'huggingface' 
+            ? `<span class="badge-container hf-badge-loading">VERIFICA...</span>` 
+            : '';
+        
+        div.innerHTML = `
+            <span class="name" title="${model.id}">${model.name || model.id}${badgeHtml}</span>
+            <span class="fav ${isFav ? 'active' : ''}">★</span>
+        `;
+
+        if (provider === 'huggingface') {
+            const badgeEl = div.querySelector('.badge-container');
+            hfStatusQueue.add(model.id, badgeEl);
+        }
+
+        div.querySelector('.name').onclick = (e) => {
+            e.stopPropagation();
+            selectModel(model.id, provider);
+        };
+
+        div.querySelector('.fav').onclick = (e) => {
+            e.stopPropagation();
+            toggleFav(model.id);
+            if (onFavChange) onFavChange();
+            div.querySelector('.fav').classList.toggle('active');
+        };
+
+        parent.appendChild(div);
+    }
+
+    function selectModel(id, provider) {
+        if (!window.CONFIG) return;
+        window.CONFIG.MODEL = id;
+        window.CONFIG.PROVIDER = provider;
+
+        if (provider === 'huggingface') {
+            window.CONFIG.API_URL = '/api/hf-proxy';
+        } else {
+            window.CONFIG.API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+        }
+
+        document.getElementById('active-model-name').innerText = id.split('/').pop();
+        console.log(`🎯 Modello attivo: ${id} (${provider})`);
+    }
+
+    function toggleFav(id) {
+        favoriteIds = favoriteIds.includes(id) ? favoriteIds.filter(f => f !== id) : [...favoriteIds, id];
+        localStorage.setItem('nemotron_favorites', JSON.stringify(favoriteIds));
+    }
+
+    function renderFavorites(container) {
+        if (!container) return;
+        container.innerHTML = favoriteIds.length ? '' : '<div style="padding:10px; font-style:italic; opacity:0.5;">Nessun preferito</div>';
+        favoriteIds.forEach(id => {
+            // Determiniamo il provider rudimentalmente (se ha uno slash, assumiamo HF per i preferiti base)
+            const provider = id.includes('/') && !id.includes('openai') && !id.includes('anthropic') ? 'huggingface' : 'openrouter';
+            createLeaf({id, name: id.split('/').pop()}, provider, container, () => renderFavorites(container));
+        });
     }
 }
 
-function selectModel(modelId) {
-    if (window.CONFIG) {
-        window.CONFIG.MODEL = modelId;
-        window.CONFIG.PROVIDER = 'huggingface';
-        
-        // Aggiorna badge visivo se esiste
-        const badge = document.querySelector('.current-model-badge') || document.querySelector('.status-bar span');
-        if (badge) badge.textContent = `MODELLO: ${modelId.toUpperCase()}`;
-        
-        appendUserMessage(`Sistema: Modello impostato su ${modelId}`, 'ai');
-    }
-}
+// Avvia il menu all'apertura
+initModelSelector();
 
-// ─── GESTIONE MESSAGGI ───────────────────────────────────────────────────────
+// ─── GESTIONE INVIO MESSAGGI CHAT ────────────────────────────────────────────
 
 async function handleSendMessage() {
     if (sendBtn.disabled) return;
@@ -128,6 +315,11 @@ async function handleSendMessage() {
             });
 
             if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error(`Il modello ${model} non è caricato nei server gratis o richiede il Token PRO.`);
+                } else if (response.status === 503) {
+                    throw new Error(`I server di Hugging Face sono in inizializzazione (503). Riprova.`);
+                }
                 const errData = await response.json().catch(() => ({}));
                 throw new Error(errData.error || `Errore HTTP ${response.status}`);
             }
@@ -145,12 +337,10 @@ async function handleSendMessage() {
             chatHistory.push({ role: 'assistant', content: `[Immagine: ${text}]` });
         } 
         
-        // --- RAMO TESTO (Streaming) ---
+        // --- RAMO TESTO (Streaming OpenRouter) ---
         else {
             contentNode.textContent = "▮";
-            const liveReasoning = window.ReasoningUI ? window.ReasoningUI.createLiveReasoningBlock() : null;
-            if (liveReasoning) msgDiv.insertBefore(liveReasoning.container, contentNode);
-
+            
             const response = await fetch(window.CONFIG.API_URL, {
                 method: 'POST',
                 headers: {
@@ -162,7 +352,7 @@ async function handleSendMessage() {
                 body: JSON.stringify({ model: model, messages: chatHistory, stream: true })
             });
 
-            if (!response.ok) throw new Error("Errore nella risposta del server.");
+            if (!response.ok) throw new Error(`Errore Server API (${response.status})`);
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -199,7 +389,7 @@ async function handleSendMessage() {
     }
 }
 
-// ─── HELPERS UI ──────────────────────────────────────────────────────────────
+// ─── UTILITY FUNZIONI ────────────────────────────────────────────────────────
 
 function appendUserMessage(content, sender = 'user') {
     const msgDiv = document.createElement('div');
