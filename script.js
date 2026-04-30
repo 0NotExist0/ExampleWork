@@ -1,6 +1,6 @@
 /**
  * NEMOADAM CLOUD UI - Core Logic Completa
- * Gestione Text Streaming, Image Proxy, Catalogo Dinamico e Stato Real-Time
+ * Gestione Text Streaming, Image Proxy, Catalogo Dinamico (con Massive Fallback) e Stato Real-Time
  */
 
 let chatHistory = [];
@@ -48,7 +48,6 @@ class StatusQueue {
         const task = this.queue.shift();
         
         try {
-            // Recupera il token di HF se configurato per evitare blocchi 401/429
             const token = window.CONFIG?._activeKey || window.CONFIG?.API_KEY || '';
             const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
@@ -73,7 +72,6 @@ class StatusQueue {
                 }
             }
         } catch (e) {
-            // Se c'è un blocco CORS del browser, finisce qui
             this.updateUI(task.badgeElement, 'error', 'CORS/OFFLINE');
         }
         
@@ -88,20 +86,38 @@ class StatusQueue {
     }
 }
 
-const hfStatusQueue = new StatusQueue(3); // 3 richieste parallele per non sovraccaricare
+const hfStatusQueue = new StatusQueue(3); 
 
-// ─── COSTRUZIONE MENU MODELLI ────────────────────────────────────────────────
+// ─── COSTRUZIONE MENU MODELLI (CON FALLBACK MASSICCIO) ───────────────────────
 
-const FIXED_HF_MODELS = [
+// Se il fetch fallisce a causa del blocco CORS, usiamo questa lista hardcoded
+const FALLBACK_HF_MODELS = [
     { id: "black-forest-labs/FLUX.1-schnell", name: "FLUX.1 Schnell" },
-    { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "SDXL Base" }
+    { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "SDXL Base" },
+    { id: "stabilityai/sdxl-turbo", name: "SDXL Turbo" },
+    { id: "ByteDance/SDXL-Lightning", name: "SDXL Lightning" },
+    { id: "runwayml/stable-diffusion-v1-5", name: "Stable Diffusion v1.5" },
+    { id: "prompthero/openjourney", name: "Openjourney" },
+    { id: "SG161222/RealVisXL_V4.0", name: "RealVisXL V4.0" },
+    { id: "cagliostrolab/animagine-xl-3.1", name: "Animagine XL 3.1" },
+    { id: "Lykon/dreamshaper-xl", name: "DreamShaper XL" },
+    { id: "stabilityai/stable-diffusion-2-1", name: "Stable Diffusion 2.1" },
+    { id: "KBlueLeaf/kohaku-v2.1", name: "Kohaku v2.1" },
+    { id: "linaqruf/anything-v3.0", name: "Anything v3.0" },
+    { id: "stablediffusionapi/edge-of-realism", name: "Edge of Realism" },
+    { id: "wavymulder/Analog-Diffusion", name: "Analog Diffusion" },
+    { id: "dallinmackay/Van-Gogh-diffusion", name: "Van Gogh Style" },
+    { id: "hakurei/waifu-diffusion", name: "Waifu Diffusion" },
+    { id: "johnslegers/epic-diffusion", name: "Epic Diffusion" },
+    { id: "nitrosocke/Ghibli-Diffusion", name: "Ghibli Style" },
+    { id: "proximasanfinis/pokemon-lora", name: "Pokemon LoRA Base" },
+    { id: "nerijs/pixel-art-xl", name: "Pixel Art XL" }
 ];
 
 async function initModelSelector() {
     const header = document.querySelector('header');
     if (!header || document.getElementById('model-menu-root')) return;
 
-    // Stili dinamici per i badge
     const styleTag = document.createElement('style');
     styleTag.textContent = `
         .hf-badge-loading { font-size: 9px; background: #374151; color: #9ca3af; padding: 1px 5px; border-radius: 3px; margin-left: 4px; font-weight: bold; }
@@ -134,22 +150,25 @@ async function initModelSelector() {
     let favoriteIds = JSON.parse(localStorage.getItem('nemotron_favorites')) || [];
 
     try {
-        // Fetch OpenRouter
-        const orRes = await fetch('https://openrouter.ai/api/v1/models');
-        if (orRes.ok) {
+        // Fetch OpenRouter (Se fallisce non blocca il resto)
+        const orRes = await fetch('https://openrouter.ai/api/v1/models').catch(() => null);
+        if (orRes && orRes.ok) {
             const orData = await orRes.json();
             allOpenRouterModels = orData.data;
         }
 
-        // Fetch HF: rimossa la query &filter=inference per evitare che l'API droppi modelli validi
-        const hfRes = await fetch('https://huggingface.co/api/models?pipeline_tag=text-to-image&sort=downloads&direction=-1&limit=50');
-        if (hfRes.ok) {
+        // Fetch HuggingFace 50 Modelli
+        console.log("Tentativo di scaricare i 50 modelli da Hugging Face...");
+        const hfRes = await fetch('https://huggingface.co/api/models?pipeline_tag=text-to-image&sort=downloads&direction=-1&limit=50').catch(() => null);
+        
+        if (hfRes && hfRes.ok) {
             dynamicHfModels = await hfRes.json();
+            console.log(`✅ Trovati ${dynamicHfModels.length} modelli live da HF!`);
         } else {
-            console.warn("⚠️ Impossibile caricare i 50 modelli da HF, uso solo i fissi.");
+            console.warn("⚠️ API HF bloccata (CORS/Rete). Attivazione Fallback Massiccio.");
         }
     } catch (e) {
-        console.error("❌ Errore caricamento modelli rete:", e);
+        console.error("❌ Eccezione durante il caricamento modelli:", e);
     }
 
     renderAll();
@@ -174,14 +193,19 @@ async function initModelSelector() {
         const hfDir = createFolder("🤗 HuggingFace (Reale)", listCont);
         const hfSub = createSubmenu(listCont);
         
-        const combinedHf = [...FIXED_HF_MODELS];
+        let combinedHf = [];
         
-        if (Array.isArray(dynamicHfModels)) {
+        // Se l'API ha risposto, usiamo i dati live. Altrimenti usiamo il Fallback Massiccio.
+        if (Array.isArray(dynamicHfModels) && dynamicHfModels.length > 0) {
             dynamicHfModels.forEach(m => {
-                if(!combinedHf.find(x => x.id === m.id)) {
-                    combinedHf.push({ id: m.id, name: m.id.split('/')[1] });
-                }
+                combinedHf.push({ id: m.id, name: m.id.split('/')[1] });
             });
+            // Assicuriamoci che Flux e SDXL ci siano sempre
+            if(!combinedHf.find(x => x.id === "black-forest-labs/FLUX.1-schnell")) combinedHf.unshift(FALLBACK_HF_MODELS[0]);
+            if(!combinedHf.find(x => x.id === "stabilityai/stable-diffusion-xl-base-1.0")) combinedHf.unshift(FALLBACK_HF_MODELS[1]);
+        } else {
+            // FALLBACK ATTIVO: Carichiamo i 20 modelli sicuri scritti a mano
+            combinedHf = [...FALLBACK_HF_MODELS];
         }
 
         combinedHf.forEach(m => createLeaf(m, 'huggingface', hfSub, () => renderFavorites(favSub)));
@@ -261,14 +285,13 @@ async function initModelSelector() {
         if (!container) return;
         container.innerHTML = favoriteIds.length ? '' : '<div style="padding:10px; font-style:italic; opacity:0.5;">Nessun preferito</div>';
         favoriteIds.forEach(id => {
-            // Determiniamo il provider rudimentalmente (se ha uno slash, assumiamo HF per i preferiti base)
             const provider = id.includes('/') && !id.includes('openai') && !id.includes('anthropic') ? 'huggingface' : 'openrouter';
             createLeaf({id, name: id.split('/').pop()}, provider, container, () => renderFavorites(container));
         });
     }
 }
 
-// Avvia il menu all'apertura
+// Avvia il menu
 initModelSelector();
 
 // ─── GESTIONE INVIO MESSAGGI CHAT ────────────────────────────────────────────
